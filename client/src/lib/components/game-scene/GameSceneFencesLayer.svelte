@@ -261,7 +261,7 @@
           return
         event.preventDefault()
         event.stopImmediatePropagation()
-        networkManager.sendStartFenceMode()
+        networkManager.sendStartLandscapingMode('Fence')
         return
       }
       if (event.button !== 0) return

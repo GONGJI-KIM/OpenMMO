@@ -1825,20 +1825,10 @@ async fn handle_client_message(
                     .await;
             }
         }
-        ClientMessage::StartFenceMode => {
-            if let Some(id) = &state.player_id {
-                game_state.start_fence_mode(id, auth_service).await;
-            }
-        }
-        ClientMessage::StartLandscapingMode => {
+        ClientMessage::StartLandscapingMode { tool } => {
             if let Some(id) = &state.player_id {
                 game_state
-                    .start_landscaping_mode(
-                        id,
-                        auth_service,
-                        onlinerpg_shared::landscaping::LandscapingTool::Ground,
-                        state.is_admin,
-                    )
+                    .start_landscaping_mode(id, auth_service, tool, state.is_admin)
                     .await;
             }
         }

@@ -17,6 +17,7 @@ import { resetFences } from '../stores/fenceStore'
 import { resetHousePlacement } from '../stores/housePlacementStore'
 import { resetEstateStorage } from '../stores/estateStorageStore'
 import type { FenceEdge } from '../terrain/fenceEdges'
+import type { LandscapingTool } from '../terrain/landscaping'
 import { remotePlayerManager } from '../managers/remotePlayerManager'
 import { monsterManager } from '../managers/monsterManager'
 import {
@@ -733,12 +734,8 @@ class NetworkManager {
     this.sendMessage({ EditFence: { edge, place } })
   }
 
-  sendStartFenceMode() {
-    this.sendMessage('StartFenceMode')
-  }
-
-  sendStartLandscapingMode() {
-    this.sendMessage('StartLandscapingMode')
+  sendStartLandscapingMode(tool: LandscapingTool) {
+    this.sendMessage({ StartLandscapingMode: { tool } })
   }
 
   sendEditLandscape(

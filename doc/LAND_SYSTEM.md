@@ -407,7 +407,7 @@ Phase 1은 골드만. 소유자별 타이머 없이 달력에 맞춰 걷는다.
 
 ### 저장과 동기화
 
-프로토콜 v59: 조경 반경은 소수(float)를 지원한다. `StartLandscapingMode`, `EditLandscape`, `LandscapingMode`,
+프로토콜 v62: `StartLandscapingMode`는 `Estate Editor`에서 선택한 도구를 전달한다. 조경 반경은 소수(float)를 지원한다. `EditLandscape`, `LandscapingMode`,
 `LandscapingPaletteUnlocked`, `LandscapeChanged`, `LandscapeInvalidated`, `LandscapeEditResult`.
 해금 재질은 `character_landscaping_palettes(character_id, palette_slot)`에 저장한다.
 지형은 `landscaping/r±xx_±zz/l_±xxxx_±zzzz.bin`에 타일별로 원자적 교체한다.

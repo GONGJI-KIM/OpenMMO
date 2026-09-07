@@ -2,6 +2,7 @@ import type { MonsterData } from '../types/Monster'
 import type { WallDirection } from '../utils/house-geometry'
 import type { ClientEnvReport } from '../utils/clientEnvReport'
 import type { FenceEdge } from '../terrain/fenceEdges'
+import type { LandscapingTool } from '../terrain/landscaping'
 
 export type Position = {
   x: number
@@ -246,8 +247,11 @@ export type ClientMessage =
     }
   | { RemoveHouse: { house_id: string } }
   | { EditFence: { edge: FenceEdge; place: boolean } }
-  | 'StartFenceMode'
-  | 'StartLandscapingMode'
+  | {
+      StartLandscapingMode: {
+        tool: LandscapingTool
+      }
+    }
   | {
       EditLandscape: {
         stroke: import('../terrain/landscaping').LandscapingStroke

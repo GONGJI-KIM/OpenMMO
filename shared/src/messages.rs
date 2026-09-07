@@ -533,8 +533,9 @@ pub enum ClientMessage {
         edge: crate::fence::FenceEdge,
         place: bool,
     },
-    StartFenceMode,
-    StartLandscapingMode,
+    StartLandscapingMode {
+        tool: crate::landscaping::LandscapingTool,
+    },
     EditLandscape {
         stroke: crate::landscaping::LandscapingStroke,
     },
