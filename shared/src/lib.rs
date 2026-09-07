@@ -10,6 +10,7 @@ pub mod character;
 pub mod debuff;
 pub mod dungeon;
 pub mod entity;
+pub mod estate_storage;
 pub mod fence;
 pub mod fishing;
 pub mod fnv;
@@ -137,7 +138,8 @@ pub const NPC_TOKEN_FILENAME: &str = "npc_token";
 /// v58: estate landscaping tools, permanent palettes and terrain updates.
 /// v59: fractional landscaping radii for one-cell brush widths.
 /// v60: player house-scroll placement preview and authoritative placement.
-pub const PROTOCOL_VERSION: u32 = 60;
+/// v61: persistent estate storage chests with atomic, weight-limited transfers.
+pub const PROTOCOL_VERSION: u32 = 61;
 
 /// Fingerprint of the dungeon layout generator this build compiled, stamped by
 /// `build.rs`. Layouts never travel the wire — both sides generate them from

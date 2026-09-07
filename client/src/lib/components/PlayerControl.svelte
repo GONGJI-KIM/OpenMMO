@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { landscapingMode } from '../stores/landscapingStore'
+  import { estateFurniturePlacementMode } from '../stores/estateFurniturePlacementStore'
   import { useThrelte } from '@threlte/core'
   import * as THREE from 'three'
   import { gameStore, hoverTarget, type LocalPlayer } from '../stores/gameStore'
@@ -1868,7 +1869,9 @@
   }
 
   function processClickIntent(event: MouseEvent): ClickIntent {
-    const groundOnly = get(landscapingMode) !== null
+    const groundOnly =
+      get(landscapingMode) !== null ||
+      get(estateFurniturePlacementMode) !== null
     const intent = inputHandler.processCanvasClick(event, {
       groundOnly,
       camera,
@@ -1955,7 +1958,10 @@
   function handleCanvasClickIntent(event: MouseEvent) {
     if (event.button === 0 && $cameraRotationEnabled) return
     const editorMode =
-      $mapEditorMode || $housingEditorMode || get(landscapingMode) !== null
+      $mapEditorMode ||
+      $housingEditorMode ||
+      get(landscapingMode) !== null ||
+      get(estateFurniturePlacementMode) !== null
     if (event.button === 2 && !editorMode) {
       handleNpcContextMenu(event)
       return
@@ -2125,7 +2131,7 @@
   }
 
   function runHover(event: MouseEvent) {
-    if (get(landscapingMode)) {
+    if (get(landscapingMode) || get(estateFurniturePlacementMode)) {
       clearHover()
       return
     }
@@ -2186,7 +2192,7 @@
   currentDungeonDepth.subscribe(() => clearHover())
 
   onMount(() => {
-    const unsubscribeLandscapingMode = landscapingMode.subscribe((mode) => {
+    const enterPlacementMode = (mode: unknown) => {
       if (!mode) return
       clearStandUpTimer()
       clearPropSwingTimers()
@@ -2194,7 +2200,11 @@
       clickSprinting = false
       transitionTo('idle')
       updatePlayerState()
-    })
+    }
+    const unsubscribeLandscapingMode =
+      landscapingMode.subscribe(enterPlacementMode)
+    const unsubscribeFurnitureMode =
+      estateFurniturePlacementMode.subscribe(enterPlacementMode)
     preloadSwordHitSound()
     preloadSwordMissSound()
     preloadMonsterDeathSounds()
@@ -2237,6 +2247,7 @@
     return () => {
       removeInputListeners()
       unsubscribeLandscapingMode()
+      unsubscribeFurnitureMode()
       canvas.removeEventListener('pointermove', handlePointerHover)
       canvas.removeEventListener('pointerleave', handlePointerLeave)
       clearHover()

@@ -11,6 +11,7 @@ export const PANEL_IDS = [
   'trade',
   'playerTrade',
   'landscaping',
+  'storage',
 ] as const
 
 export type PanelId = (typeof PANEL_IDS)[number]

@@ -394,6 +394,64 @@ async fn house_demolition_keeps_house_when_the_scroll_is_too_heavy() {
 }
 
 #[tokio::test]
+async fn house_demolition_rejects_a_house_containing_storage() {
+    let (game, auth, _, mut rx) = builder().await;
+    game.inventories
+        .write()
+        .await
+        .get_mut(&pid("Builder"))
+        .unwrap()
+        .bag = vec![
+        bag_item(2, "scroll_of_small_house", 1),
+        bag_item(3, "storage_chest", 1),
+        bag_item(4, onlinerpg_shared::landscaping::TOOLBOX_ITEM, 1),
+    ];
+    game.place_house(
+        &pid("Builder"),
+        2,
+        Position {
+            x: 5.0,
+            y: 5.0,
+            z: 5.0,
+        },
+        0,
+        &auth,
+    )
+    .await;
+    let house = game.housing_io.read_all_houses().await.unwrap().remove(0);
+    let room = house
+        .rooms
+        .iter()
+        .find(|room| room.floor_level == 0 && room.room_type != RoomType::Stairwell)
+        .unwrap();
+    let room_center = Position {
+        x: house.origin.x + room.local_x as f32 + f32::from(room.size_x) / 2.0,
+        y: house.origin.y,
+        z: house.origin.z + room.local_z as f32 + f32::from(room.size_z) / 2.0,
+    };
+    game.players
+        .write()
+        .await
+        .get_mut(&pid("Builder"))
+        .unwrap()
+        .position = room_center;
+    game.place_estate_chest(&pid("Builder"), 3, room_center, 0.0, 0, &auth)
+        .await;
+    assert_eq!(auth.load_estate_chests().unwrap().len(), 1);
+    drain(&mut rx);
+
+    game.demolish_house(&pid("Builder"), house.id.clone(), &auth)
+        .await;
+
+    assert_eq!(game.housing_io.read_all_houses().await.unwrap().len(), 1);
+    assert!(drain(&mut rx).iter().any(|message| matches!(
+        message,
+        ServerMessage::HouseDemolitionResult { house_id, error: Some(reason) }
+            if house_id == &house.id && reason.contains("storage chest")
+    )));
+}
+
+#[tokio::test]
 async fn house_placement_requires_the_toolbox_on_the_authoritative_request() {
     let (game, auth, _, mut rx) = builder().await;
     game.inventories

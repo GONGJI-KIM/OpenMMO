@@ -46,6 +46,7 @@ import {
   fencePending,
   fenceError,
   resetFences,
+  stopFenceMode,
 } from '../stores/fenceStore'
 import {
   openLandscapingMode,
@@ -55,6 +56,15 @@ import {
   selectLandscapingTool,
 } from '../stores/landscapingStore'
 import type { LandscapingTile } from '../terrain/landscaping'
+import {
+  applyEstateChestVisibility,
+  estateChestError,
+  estateChestMode,
+  estateChestPending,
+  openEstateChest,
+  resetEstateStorage,
+  stopEstateChestMode,
+} from '../stores/estateStorageStore'
 import { inventoryVisible } from '../stores/debugStore'
 import {
   landClaimDialog,
@@ -533,6 +543,7 @@ export function handleServerMessage(
     case 'JoinSuccess': {
       resetFences()
       resetHousePlacement()
+      resetEstateStorage()
       const serverPlayer: ServerPlayer = data.player
       console.log('Join successful, received player data:', serverPlayer)
       isAdminUser.set(data.is_admin === true)
@@ -1329,6 +1340,7 @@ export function handleServerMessage(
       break
     }
     case 'LandscapingMode':
+      stopEstateChestMode()
       resetHousePlacement()
       openLandscapingMode(data)
       inventoryVisible.set(false)
@@ -1376,6 +1388,28 @@ export function handleServerMessage(
     case 'FenceEditResult':
       fencePending.set(false)
       fenceError.set(data.error ?? null)
+      break
+    case 'EstateChestMode':
+      stopFenceMode()
+      estateChestMode.set(data)
+      inventoryVisible.set(false)
+      estateChestError.set(null)
+      break
+    case 'EstateChestVisibility':
+      applyEstateChestVisibility(data.added, data.removed)
+      break
+    case 'EstateChestEditResult':
+      estateChestPending.set(false)
+      estateChestError.set(data.error ?? null)
+      if (!data.error) estateChestMode.set(null)
+      break
+    case 'EstateChestState':
+      estateChestPending.set(false)
+      if (data.error) estateChestError.set(data.error)
+      if (data.state) {
+        inventoryVisible.set(false)
+        openEstateChest.set(data.state)
+      }
       break
 
     case 'LandClaimed': {

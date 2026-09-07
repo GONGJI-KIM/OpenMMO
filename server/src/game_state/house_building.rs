@@ -473,6 +473,9 @@ impl GameState {
         if distance_to_house(&house, &player_position) > PLACEMENT_REACH_M {
             return Err("Move within 30 metres of the house.".to_string());
         }
+        if self.house_contains_estate_chest(&house).await {
+            return Err("Remove every storage chest before demolishing this house.".to_string());
+        }
         let refund = match house.source_scroll_id.as_deref() {
             Some(item_id)
                 if HOUSE_SCROLLS.iter().any(|(known, _)| *known == item_id)

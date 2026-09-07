@@ -15,6 +15,7 @@ import { resetPlayerTrade } from '../stores/playerTradeStore'
 import { resetLandClaimPreview, type LandClaim } from '../stores/landClaimStore'
 import { resetFences } from '../stores/fenceStore'
 import { resetHousePlacement } from '../stores/housePlacementStore'
+import { resetEstateStorage } from '../stores/estateStorageStore'
 import type { FenceEdge } from '../terrain/fenceEdges'
 import { remotePlayerManager } from '../managers/remotePlayerManager'
 import { monsterManager } from '../managers/monsterManager'
@@ -237,6 +238,7 @@ class NetworkManager {
     this.socket.onclose = (event) => {
       resetFences()
       resetHousePlacement()
+      resetEstateStorage()
       resetLandClaimPreview()
       console.log('Disconnected from server', event.code, event.reason)
       gameStore.update((state) => ({ ...state, isConnected: false }))
@@ -743,6 +745,53 @@ class NetworkManager {
     stroke: import('../terrain/landscaping').LandscapingStroke
   ) {
     this.sendMessage({ EditLandscape: { stroke } })
+  }
+
+  sendPlaceEstateChest(
+    instanceId: number,
+    position: Position,
+    rotationDeg: number,
+    floorLevel: number
+  ) {
+    this.sendMessage({
+      PlaceEstateChest: {
+        instance_id: instanceId,
+        position,
+        rotation_deg: rotationDeg,
+        floor_level: floorLevel,
+      },
+    })
+  }
+
+  sendOpenEstateChest(chestId: number) {
+    this.sendMessage({ OpenEstateChest: { chest_id: chestId } })
+  }
+
+  sendTransferEstateItems(
+    chestId: number,
+    deposits: BagLineItem[],
+    withdrawals: BagLineItem[],
+    revision: number
+  ) {
+    const validDeposits = deposits.filter((item) =>
+      this.isNetworkableInstanceId(item.instance_id, 'store')
+    )
+    const validWithdrawals = withdrawals.filter((item) =>
+      this.isNetworkableInstanceId(item.instance_id, 'take')
+    )
+    if (validDeposits.length === 0 && validWithdrawals.length === 0) return
+    this.sendMessage({
+      TransferEstateItems: {
+        chest_id: chestId,
+        deposits: validDeposits,
+        withdrawals: validWithdrawals,
+        expected_revision: revision,
+      },
+    })
+  }
+
+  sendRecoverEstateChest(chestId: number) {
+    this.sendMessage({ RecoverEstateChest: { chest_id: chestId } })
   }
 
   sendLandAccount(merchantPlayerId: number) {
