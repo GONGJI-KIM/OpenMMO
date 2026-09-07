@@ -1,3 +1,4 @@
+use super::combat_audit::PlayerAttackWindow;
 use crate::game::{character_hp, combat};
 
 #[derive(Debug, Clone, Copy)]
@@ -212,28 +213,39 @@ impl super::GameState {
         });
     }
 
-    async fn claim_player_attack_window(&self, player_id: &PlayerId) -> bool {
+    async fn claim_player_attack_window(&self, player_id: &PlayerId) -> PlayerAttackWindow {
         let now = Self::now_ms();
         // Hunger only lengthens the interval, so an attack still inside the
         // base window never needs the hunger lookup — spam-clicks stay cheap.
-        if self
+        if let Some(last) = self
             .last_player_attacks
             .read()
             .await
             .get(player_id)
-            .is_some_and(|last| now.saturating_sub(*last) < *PLAYER_ATTACK_INTERVAL_MS)
+            .copied()
+            .filter(|last| now.saturating_sub(*last) < *PLAYER_ATTACK_INTERVAL_MS)
         {
-            return false;
+            return PlayerAttackWindow {
+                checked_at_ms: now,
+                since_accepted_ms: Some(now.saturating_sub(last)),
+                checked_interval_ms: *PLAYER_ATTACK_INTERVAL_MS,
+                accepted: false,
+            };
         }
         let attack_mult = self.hunger_attack_mult(player_id).await.max(f32::EPSILON);
         let required_interval = (*PLAYER_ATTACK_INTERVAL_MS as f32 / attack_mult).ceil() as u64;
         let mut last_attacks = self.last_player_attacks.write().await;
         let last = last_attacks.entry(*player_id).or_insert(0);
-        if now.saturating_sub(*last) < required_interval {
-            return false;
+        let result = PlayerAttackWindow {
+            checked_at_ms: now,
+            since_accepted_ms: (*last != 0).then(|| now.saturating_sub(*last)),
+            checked_interval_ms: required_interval,
+            accepted: now.saturating_sub(*last) >= required_interval,
+        };
+        if result.accepted {
+            *last = now;
         }
-        *last = now;
-        true
+        result
     }
 
     /// A player's worn gear paired with its defs — the single place that
@@ -554,6 +566,7 @@ impl super::GameState {
         monster_id: String,
         auth: Option<&crate::auth::AuthService>,
     ) {
+        let audit = self.combat_audit.player_attack(*player_id, &monster_id);
         let PlayerAttackContext {
             monster_type,
             monster_position,
@@ -572,6 +585,9 @@ impl super::GameState {
                     "Rejected player attack: {} -> {} ({:?}: {})",
                     player_id, monster_id, reason, detail
                 );
+                if let Some(audit) = audit {
+                    audit.finish(reason.to_string(), Some(detail), None);
+                }
                 self.send_direct_message(
                     player_id,
                     ServerMessage::PlayerAttackRejected { monster_id, reason },
@@ -580,7 +596,16 @@ impl super::GameState {
                 return;
             }
         };
-        if !self.claim_player_attack_window(player_id).await {
+        let timing = self.claim_player_attack_window(player_id).await;
+        let accepted = timing.accepted;
+        if let Some(audit) = audit {
+            audit.finish(
+                if accepted { "accepted" } else { "cooldown" }.into(),
+                None,
+                Some(timing),
+            );
+        }
+        if !accepted {
             return;
         }
         // Spent once the swing is committed, so a shot refused by any gate
