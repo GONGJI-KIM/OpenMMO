@@ -24,6 +24,7 @@ mod enchant_tests;
 mod fence_tests;
 mod fishing_tests;
 mod friend_tests;
+mod house_building_tests;
 mod house_floor_tests;
 mod hunger_tests;
 mod instrument_tests;

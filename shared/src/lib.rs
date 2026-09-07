@@ -136,7 +136,8 @@ pub const NPC_TOKEN_FILENAME: &str = "npc_token";
 /// v57: persistent cell-edge fences, placement mode and inventory recovery.
 /// v58: estate landscaping tools, permanent palettes and terrain updates.
 /// v59: fractional landscaping radii for one-cell brush widths.
-pub const PROTOCOL_VERSION: u32 = 59;
+/// v60: player house-scroll placement preview and authoritative placement.
+pub const PROTOCOL_VERSION: u32 = 60;
 
 /// Fingerprint of the dungeon layout generator this build compiled, stamped by
 /// `build.rs`. Layouts never travel the wire — both sides generate them from

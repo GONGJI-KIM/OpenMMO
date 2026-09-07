@@ -236,6 +236,7 @@ pub(crate) use debuff::WET_DEBUFF_ID;
 mod dungeon;
 mod fence;
 mod friends;
+mod house_building;
 pub(crate) mod hunger;
 mod instrument;
 mod inventory;

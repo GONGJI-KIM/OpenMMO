@@ -1,5 +1,6 @@
 pub mod coords;
 pub mod defaults;
+pub mod grass;
 pub mod height;
 pub mod io;
 pub mod land;

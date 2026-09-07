@@ -37,6 +37,7 @@
   import GameSceneWindParticles from './game-scene/GameSceneWindParticles.svelte'
   import GameSceneHousingLayer from './game-scene/GameSceneHousingLayer.svelte'
   import GameSceneLandClaimLayer from './game-scene/GameSceneLandClaimLayer.svelte'
+  import GameSceneHousePlacementLayer from './game-scene/GameSceneHousePlacementLayer.svelte'
   import GameSceneFencesLayer from './game-scene/GameSceneFencesLayer.svelte'
   import GameSceneLandscapingLayer from './game-scene/GameSceneLandscapingLayer.svelte'
   import GameSceneDungeonLayer from './game-scene/GameSceneDungeonLayer.svelte'
@@ -1205,6 +1206,12 @@
 <GameSceneLandClaimLayer
   heightManager={terrainHeightManager}
   playerPosition={currentPlayer?.position ?? null}
+/>
+<GameSceneHousePlacementLayer
+  heightManager={terrainHeightManager}
+  {terrainMeshes}
+  player={currentPlayer ?? null}
+  housingGroup={housingLayerRef?.getGroup() ?? null}
 />
 <GameSceneFencesLayer
   heightManager={terrainHeightManager}

@@ -1663,16 +1663,25 @@ async fn handle_client_message(
             );
         }
 
-        ClientMessage::PlaceHouse { .. } => {
-            warn!("Ignoring client-side PlaceHouse broadcast request; use the housing REST API");
+        ClientMessage::PlaceHouse {
+            instance_id,
+            origin,
+        } => {
+            if let Some(id) = &state.player_id {
+                game_state
+                    .place_house(id, instance_id, origin, auth_service)
+                    .await;
+            }
         }
 
         ClientMessage::ModifyRoom { .. } => {
             // TODO: room modification broadcast
         }
 
-        ClientMessage::RemoveHouse { .. } => {
-            warn!("Ignoring client-side RemoveHouse broadcast request; use the housing REST API");
+        ClientMessage::RemoveHouse { house_id } => {
+            if let Some(id) = &state.player_id {
+                game_state.demolish_house(id, house_id, auth_service).await;
+            }
         }
 
         ClientMessage::ToggleDoor {
@@ -1754,8 +1763,11 @@ async fn handle_client_message(
         ClientMessage::UseItem { instance_id } => {
             if let Some(id) = &state.player_id {
                 if !game_state
-                    .try_use_landscaping_item(id, instance_id, auth_service, state.is_admin)
+                    .try_start_house_placement(id, instance_id, auth_service)
                     .await
+                    && !game_state
+                        .try_use_landscaping_item(id, instance_id, auth_service, state.is_admin)
+                        .await
                     && !game_state
                         .try_start_fence_mode(id, instance_id, auth_service)
                         .await

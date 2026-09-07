@@ -17,29 +17,45 @@
   } from '../stores/fenceStore'
   import type { LandscapingTool } from '../terrain/landscaping'
   import { isAdminUser } from '../stores/gameStore'
+  import { stopHouseInteraction } from '../stores/housePlacementStore'
+  import HousePlacementPanel from './HousePlacementPanel.svelte'
   import SplatBrushPanel from './map-editor/SplatBrushPanel.svelte'
   import { draggablePanel } from '../actions/draggablePanel'
 
-  const tabs: LandscapingTool[] = ['Ground', 'Road', 'Fence']
+  const tabs: LandscapingTool[] = ['Ground', 'Road', 'Fence', 'House']
+
+  function selectTool(tab: LandscapingTool) {
+    if (tab !== 'House') {
+      stopHouseInteraction()
+    }
+    selectLandscapingTool(tab)
+  }
+
+  function close() {
+    stopHouseInteraction()
+    stopFenceMode()
+  }
 </script>
 
 {#if $landscapingMode}
   {@const status =
-    $landscapingMode.tool === 'Fence'
-      ? $fencePending
-        ? 'Saving…'
-        : ($fenceError ?? $fenceTarget?.reason)
-      : $landscapingPending
-        ? 'Saving…'
-        : ($landscapingError ?? $landscapingHint)}
+    $landscapingMode.tool === 'House'
+      ? null
+      : $landscapingMode.tool === 'Fence'
+        ? $fencePending
+          ? 'Saving…'
+          : ($fenceError ?? $fenceTarget?.reason)
+        : $landscapingPending
+          ? 'Saving…'
+          : ($landscapingError ?? $landscapingHint)}
   <div class="landscaping-panel" use:draggablePanel={'landscaping'}>
     <div class="panel-header" data-drag-handle>
-      <strong>Estate Landscaping</strong>
+      <strong>Landscaper's Toolbox</strong>
       <button
         class="close-btn"
         aria-label="Close landscaping"
         title="Close (Esc)"
-        onclick={stopFenceMode}>×</button
+        onclick={close}>×</button
       >
     </div>
     <div class="tabs" role="tablist" aria-label="Landscaping tools">
@@ -52,11 +68,13 @@
           title={tab !== 'Fence' && !$hasLandscapingToolbox
             ? "Carry a Landscaper's Toolbox to paint"
             : tab}
-          onclick={() => selectLandscapingTool(tab)}>{tab}</button
+          onclick={() => selectTool(tab)}>{tab}</button
         >
       {/each}
     </div>
-    {#if $landscapingMode.tool === 'Fence'}
+    {#if $landscapingMode.tool === 'House'}
+      <HousePlacementPanel />
+    {:else if $landscapingMode.tool === 'Fence'}
       <div class="fence-content">
         <strong>Wooden Fence · {$fenceCount} in bag</strong>
         {#if $isAdminUser}

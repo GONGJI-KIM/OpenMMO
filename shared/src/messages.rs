@@ -472,7 +472,8 @@ pub enum ClientMessage {
     StopInteraction,
     Heartbeat,
     PlaceHouse {
-        house: housing::HouseData,
+        instance_id: u64,
+        origin: Position,
     },
     ModifyRoom {
         house_id: String,
@@ -1340,10 +1341,26 @@ pub enum ServerMessage {
     HouseSpawned {
         house: housing::HouseData,
     },
+    HousePlacementStarted {
+        instance_id: u64,
+        item_name: String,
+        house: housing::HouseData,
+        plots: Vec<crate::fence::FencePlot>,
+    },
+    HousePlacementResult {
+        error: Option<String>,
+    },
+    HouseDemolitionResult {
+        house_id: String,
+        error: Option<String>,
+    },
     HouseUpdated {
         house: housing::HouseData,
     },
     TreeTilesInvalidated {
+        tiles: Vec<(i32, i32)>,
+    },
+    GrassTilesInvalidated {
         tiles: Vec<(i32, i32)>,
     },
     HouseRemoved {

@@ -14,6 +14,7 @@ import { resetFriendStores } from '../stores/friendStore'
 import { resetPlayerTrade } from '../stores/playerTradeStore'
 import { resetLandClaimPreview, type LandClaim } from '../stores/landClaimStore'
 import { resetFences } from '../stores/fenceStore'
+import { resetHousePlacement } from '../stores/housePlacementStore'
 import type { FenceEdge } from '../terrain/fenceEdges'
 import { remotePlayerManager } from '../managers/remotePlayerManager'
 import { monsterManager } from '../managers/monsterManager'
@@ -235,6 +236,7 @@ class NetworkManager {
 
     this.socket.onclose = (event) => {
       resetFences()
+      resetHousePlacement()
       resetLandClaimPreview()
       console.log('Disconnected from server', event.code, event.reason)
       gameStore.update((state) => ({ ...state, isConnected: false }))
@@ -701,6 +703,15 @@ class NetworkManager {
   sendUseItem(instanceId: number) {
     if (!this.isNetworkableInstanceId(instanceId, 'use')) return
     this.sendMessage({ UseItem: { instance_id: instanceId } })
+  }
+
+  sendPlaceHouse(instanceId: number, origin: Position) {
+    if (!this.isNetworkableInstanceId(instanceId, 'place house')) return
+    this.sendMessage({ PlaceHouse: { instance_id: instanceId, origin } })
+  }
+
+  sendRemoveHouse(houseId: string) {
+    this.sendMessage({ RemoveHouse: { house_id: houseId } })
   }
 
   sendLandClaim(claim: LandClaim) {

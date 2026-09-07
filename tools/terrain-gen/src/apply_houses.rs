@@ -32,16 +32,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+#[cfg(test)]
+use onlinerpg_shared::worldgen::vegetation::{
+    GRASS_V3_BYTES_PER_INSTANCE, GRASS_V3_HEADER_BYTES, GRASS_V3_MAGIC,
+};
 use onlinerpg_shared::{
     housing::{HouseData, RoomData},
-    worldgen::{
-        tile_bake::{HEIGHT_BIAS, HEIGHT_STEP},
-        vegetation::{GRASS_V3_BYTES_PER_INSTANCE, GRASS_V3_HEADER_BYTES, GRASS_V3_MAGIC},
-    },
+    worldgen::tile_bake::{HEIGHT_BIAS, HEIGHT_STEP},
 };
 use onlinerpg_terrain::{
     coords,
     defaults::{HEIGHTMAP_SIZE, TILE_DIM, VERTS_PER_SIDE},
+    grass::filter_grass_v3_bytes_in_rects,
     trees::TreeExclusionRect,
 };
 
@@ -321,6 +323,7 @@ fn flatten_houses(
 // Grass clear
 // ===================================================================
 
+#[cfg(test)]
 fn read_u32_le(data: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes([
         data[offset],
@@ -328,74 +331,6 @@ fn read_u32_le(data: &[u8], offset: usize) -> u32 {
         data[offset + 2],
         data[offset + 3],
     ])
-}
-
-/// Drop V3 grass instances whose world position falls inside any `rects`.
-/// Returns the rewritten buffer and the number of blades removed.
-fn filter_grass_v3_in_rects(
-    tx: i32,
-    tz: i32,
-    data: &[u8],
-    rects: &[Rect],
-) -> Result<(Vec<u8>, usize)> {
-    if data.len() < GRASS_V3_HEADER_BYTES {
-        bail!("grass data header is truncated");
-    }
-    let magic = read_u32_le(data, 0);
-    if magic != GRASS_V3_MAGIC {
-        bail!("unsupported grass data magic 0x{magic:08x}");
-    }
-    let counts = [
-        read_u32_le(data, 4) as usize,
-        read_u32_le(data, 8) as usize,
-        read_u32_le(data, 12) as usize,
-    ];
-    let total: usize = counts.iter().sum();
-    let expected = GRASS_V3_HEADER_BYTES + total * GRASS_V3_BYTES_PER_INSTANCE;
-    if data.len() != expected {
-        bail!(
-            "grass data length {} != expected {} (counts {:?})",
-            data.len(),
-            expected,
-            counts
-        );
-    }
-
-    let tile_min_x = tile_min_world(tx);
-    let tile_min_z = tile_min_world(tz);
-    // Inverse of `encode_grass_v3`'s `pos_scale = 65535 / TILE_DIM`.
-    let inv_pos_scale = TILE_DIM as f32 / 65535.0;
-
-    let mut kept_counts = [0u32; 3];
-    let mut body: Vec<u8> = Vec::with_capacity(data.len() - GRASS_V3_HEADER_BYTES);
-    let mut removed = 0usize;
-    let mut offset = GRASS_V3_HEADER_BYTES;
-
-    for (bucket, &count) in counts.iter().enumerate() {
-        for _ in 0..count {
-            let inst = &data[offset..offset + GRASS_V3_BYTES_PER_INSTANCE];
-            offset += GRASS_V3_BYTES_PER_INSTANCE;
-            let px = u16::from_le_bytes([inst[0], inst[1]]) as f32;
-            let pz = u16::from_le_bytes([inst[2], inst[3]]) as f32;
-            let world_x = tile_min_x + px * inv_pos_scale;
-            let world_z = tile_min_z + pz * inv_pos_scale;
-
-            if point_in_any(rects, world_x, world_z) {
-                removed += 1;
-            } else {
-                kept_counts[bucket] += 1;
-                body.extend_from_slice(inst);
-            }
-        }
-    }
-
-    let mut out = Vec::with_capacity(GRASS_V3_HEADER_BYTES + body.len());
-    out.extend_from_slice(&GRASS_V3_MAGIC.to_le_bytes());
-    for c in kept_counts {
-        out.extend_from_slice(&c.to_le_bytes());
-    }
-    out.extend_from_slice(&body);
-    Ok((out, removed))
 }
 
 /// World-space grass rect of a ground-floor room, expanded by `margin` on all
@@ -437,11 +372,11 @@ fn clear_grass(
             Err(err) => return Err(err).with_context(|| format!("read {}", path.display())),
         };
 
-        let (filtered, removed) = filter_grass_v3_in_rects(tx, tz, &data, &rects)
-            .with_context(|| format!("filter {}", path.display()))?;
-        if removed == 0 {
+        let Some((filtered, removed)) = filter_grass_v3_bytes_in_rects(tx, tz, &data, &rects)
+            .with_context(|| format!("filter {}", path.display()))?
+        else {
             continue;
-        }
+        };
 
         if !dry_run {
             let orig_path = coords::original_grass_path(terrain, tx, tz);
@@ -584,7 +519,9 @@ mod tests {
         let data = encode_grass([&[(32.0, 32.0)], &[(52.0, 32.0)], &[]]);
         let rect: Rect = [-5.0, -5.0, 5.0, 5.0];
 
-        let (out, removed) = filter_grass_v3_in_rects(0, 0, &data, &[rect]).unwrap();
+        let (out, removed) = filter_grass_v3_bytes_in_rects(0, 0, &data, &[rect])
+            .unwrap()
+            .unwrap();
         assert_eq!(removed, 1);
 
         // Header counts: short dropped to 0, tall kept 1, flower 0.
@@ -603,15 +540,15 @@ mod tests {
         let data = encode_grass([&[(10.0, 10.0)], &[], &[]]);
         // Rect far from the single blade at world ~(-22,-22).
         let rect: Rect = [100.0, 100.0, 110.0, 110.0];
-        let (out, removed) = filter_grass_v3_in_rects(0, 0, &data, &[rect]).unwrap();
-        assert_eq!(removed, 0);
-        assert_eq!(out, data);
+        assert!(filter_grass_v3_bytes_in_rects(0, 0, &data, &[rect])
+            .unwrap()
+            .is_none());
     }
 
     #[test]
     fn grass_filter_rejects_bad_magic() {
         let mut data = encode_grass([&[(1.0, 1.0)], &[], &[]]);
         data[0] = 0xff;
-        assert!(filter_grass_v3_in_rects(0, 0, &data, &[[0.0, 0.0, 1.0, 1.0]]).is_err());
+        assert!(filter_grass_v3_bytes_in_rects(0, 0, &data, &[[0.0, 0.0, 1.0, 1.0]]).is_err());
     }
 }

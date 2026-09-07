@@ -52,6 +52,7 @@ import {
   landscapingMode,
   landscapingPending,
   landscapingError,
+  selectLandscapingTool,
 } from '../stores/landscapingStore'
 import type { LandscapingTile } from '../terrain/landscaping'
 import { inventoryVisible } from '../stores/debugStore'
@@ -59,6 +60,12 @@ import {
   landClaimDialog,
   applyLandClaimPreview,
 } from '../stores/landClaimStore'
+import {
+  applyHousePlacementResult,
+  applyHouseDemolitionResult,
+  openHousePlacement,
+  resetHousePlacement,
+} from '../stores/housePlacementStore'
 import { capeTextureDialog } from '../stores/capeTextureStore'
 import { setCapeUploadToken } from '../utils/networkUtils'
 import { hungerState, grilling, type HungerBand } from '../stores/hungerStore'
@@ -522,6 +529,7 @@ export function handleServerMessage(
 
     case 'JoinSuccess': {
       resetFences()
+      resetHousePlacement()
       const serverPlayer: ServerPlayer = data.player
       console.log('Join successful, received player data:', serverPlayer)
       isAdminUser.set(data.is_admin === true)
@@ -1313,10 +1321,12 @@ export function handleServerMessage(
     }
 
     case 'LandClaimPrompt': {
+      resetHousePlacement()
       applyLandClaimPreview(data)
       break
     }
     case 'LandscapingMode':
+      resetHousePlacement()
       openLandscapingMode(data)
       inventoryVisible.set(false)
       fenceError.set(null)
@@ -1557,6 +1567,25 @@ export function handleServerMessage(
       housingManager.handleRemoteHouseSpawned(data.house)
       break
 
+    case 'HousePlacementStarted':
+      landClaimDialog.set(null)
+      selectLandscapingTool('House')
+      openHousePlacement(
+        data.instance_id,
+        data.item_name,
+        data.house,
+        data.plots
+      )
+      break
+
+    case 'HousePlacementResult':
+      applyHousePlacementResult(data.error ?? null)
+      break
+
+    case 'HouseDemolitionResult':
+      applyHouseDemolitionResult(data.house_id, data.error ?? null)
+      break
+
     case 'HouseUpdated':
       housingManager.handleRemoteHouseSpawned(data.house)
       break
@@ -1564,6 +1593,12 @@ export function handleServerMessage(
     case 'TreeTilesInvalidated': {
       const treeDataManager = get(editorTreeDataManager)
       if (treeDataManager) void treeDataManager.refreshTiles(data.tiles ?? [])
+      break
+    }
+
+    case 'GrassTilesInvalidated': {
+      const grassDataManager = get(editorGrassDataManager)
+      if (grassDataManager) void grassDataManager.refreshTiles(data.tiles ?? [])
       break
     }
 

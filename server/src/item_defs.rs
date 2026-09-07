@@ -238,6 +238,8 @@ pub enum UseEffect {
     /// Bring a defeated user back where they fell with this percentage of
     /// their max HP (phoenix talisman).
     ReviveInPlace(u32),
+    /// Open placement mode for one of the fixed house scrolls.
+    PlaceHouse,
 }
 
 impl ItemDefinition {
@@ -391,6 +393,7 @@ impl ItemDefinition {
             "cape_dye" => Some(UseEffect::PromptCapeDye),
             "cape_texture" => Some(UseEffect::PromptCapeTexture),
             "phoenix_talisman" => self.revive_hp_percent.map(UseEffect::ReviveInPlace),
+            "house_scroll" => Some(UseEffect::PlaceHouse),
             _ => None,
         }
     }

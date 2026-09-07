@@ -33,6 +33,7 @@
   import TipHatDialog from './TipHatDialog.svelte'
   import CapeDyeDialog from './CapeDyeDialog.svelte'
   import LandClaimDialog from './LandClaimDialog.svelte'
+  import HouseDemolitionDialog from './HouseDemolitionDialog.svelte'
   import { landClaimDialog } from '../stores/landClaimStore'
   import { capeDyeDialog } from '../stores/capeDyeStore'
   import CapeTextureDialog from './CapeTextureDialog.svelte'
@@ -54,6 +55,11 @@
   import { mountOverlay } from '../stores/overlayStack'
   import { networkManager, type AccountCharacter } from '../network/socket'
   import { tipHatDialog } from '../stores/tipHatStore'
+  import {
+    beginHouseDemolition,
+    houseDemolitionConfirmation,
+    stopHouseInteraction,
+  } from '../stores/housePlacementStore'
 
   interface Props {
     selectedCharacter: AccountCharacter | null
@@ -132,6 +138,17 @@
   function toggleFromSocialMenu(panel: Writable<boolean>) {
     socialMenuOpen = false
     panel.update((v) => !v)
+  }
+
+  function cancelHouseDemolition() {
+    houseDemolitionConfirmation.set(null)
+  }
+
+  function confirmHouseDemolition(houseId: string) {
+    houseDemolitionConfirmation.set(null)
+    stopHouseInteraction()
+    beginHouseDemolition(houseId)
+    networkManager.sendRemoveHouse(houseId)
   }
 </script>
 
@@ -405,6 +422,14 @@
 
 {#if $landClaimDialog}
   <LandClaimDialog />
+{/if}
+
+{#if $houseDemolitionConfirmation}
+  <HouseDemolitionDialog
+    house={$houseDemolitionConfirmation}
+    onConfirm={confirmHouseDemolition}
+    onCancel={cancelHouseDemolition}
+  />
 {/if}
 
 {#if $capeTextureDialog}

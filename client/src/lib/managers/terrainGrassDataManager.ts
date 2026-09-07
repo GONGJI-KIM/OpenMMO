@@ -354,6 +354,26 @@ export class TerrainGrassDataManager {
     this.missingTiles.delete(key)
   }
 
+  async refreshTiles(
+    tiles: readonly (readonly [number, number])[]
+  ): Promise<void> {
+    const unique = new Map<string, readonly [number, number]>()
+    for (const tile of tiles) {
+      unique.set(tileKey(tile[0], tile[1]), tile)
+    }
+
+    await Promise.all(
+      Array.from(unique.values(), ([tileX, tileZ]) => {
+        const key = tileKey(tileX, tileZ)
+        this.inflight.delete(key)
+        this.invalidate(tileX, tileZ)
+        return this.loadGrassData(tileX, tileZ).finally(() => {
+          for (const cb of this.tileUpdateListeners) cb(tileX, tileZ)
+        })
+      })
+    )
+  }
+
   /** Clear all caches so every tile is re-fetched from the server. */
   invalidateAll(): void {
     this.generation++

@@ -837,6 +837,10 @@ impl super::GameState {
                 self.use_phoenix_talisman(player_id, instance_id, hp_percent)
                     .await
             }
+            UseEffect::PlaceHouse => {
+                self.send_system_message(player_id, "Use this scroll again to place its house.")
+                    .await
+            }
         }
     }
 

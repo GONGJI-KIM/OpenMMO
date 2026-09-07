@@ -237,6 +237,8 @@ export type ClientMessage =
   | 'PickupStarted'
   | { PickupItem: { instance_id: number } }
   | { UseItem: { instance_id: number } }
+  | { PlaceHouse: { instance_id: number; origin: Position } }
+  | { RemoveHouse: { house_id: string } }
   | { EditFence: { edge: FenceEdge; place: boolean } }
   | 'StartFenceMode'
   | 'StartLandscapingMode'
