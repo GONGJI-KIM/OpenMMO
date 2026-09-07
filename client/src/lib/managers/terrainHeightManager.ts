@@ -32,6 +32,7 @@ import {
   ensureOriginalHeightmap as doEnsureOriginal,
   saveDirtyTiles,
 } from './terrain-height-persistence'
+import { wrapTileX } from '../terrain/world-wrap'
 
 export type { AffectedTile, HeightChangedCallback }
 
@@ -382,6 +383,50 @@ export class TerrainHeightManager {
   }
 
   // --- Data management ---
+
+  async refreshTiles(
+    tiles: readonly (readonly [number, number])[]
+  ): Promise<void> {
+    const requested = new Set(
+      tiles.map(([tileX, tileZ]) => tileKey(wrapTileX(tileX), tileZ))
+    )
+    const aliases = new Map<string, [number, number]>()
+    for (const key of [
+      ...this.state.heightmaps.keys(),
+      ...this.state.geometries.keys(),
+    ]) {
+      const [tileX, tileZ] = key.split(',').map(Number)
+      if (requested.has(tileKey(wrapTileX(tileX), tileZ))) {
+        aliases.set(key, [tileX, tileZ])
+      }
+    }
+    const covered = new Set(
+      [...aliases.values()].map(([tileX, tileZ]) =>
+        tileKey(wrapTileX(tileX), tileZ)
+      )
+    )
+    for (const [tileX, tileZ] of tiles) {
+      const canonicalKey = tileKey(wrapTileX(tileX), tileZ)
+      if (covered.has(canonicalKey)) continue
+      aliases.set(tileKey(tileX, tileZ), [tileX, tileZ])
+      covered.add(canonicalKey)
+    }
+
+    await Promise.all(
+      [...aliases.values()].map(async ([tileX, tileZ]) => {
+        const key = tileKey(tileX, tileZ)
+        if (this.state.dirtyTiles.has(key)) return
+        const inflight = this.inflightHeightmaps.get(key)
+        if (inflight) await inflight.catch(() => {})
+        this.state.heightmaps.delete(key)
+        this.state.originalHeightmaps.delete(key)
+        this.state.missingOriginalTiles.delete(key)
+        await this.loadHeightmap(tileX, tileZ)
+        this.refreshTileGeometry(tileX, tileZ)
+        this.refreshAdjacentTileEdges(tileX, tileZ)
+      })
+    )
+  }
 
   setHeightmap(tileX: number, tileZ: number, data: Uint16Array): void {
     this.state.heightmaps.set(tileKey(tileX, tileZ), data)

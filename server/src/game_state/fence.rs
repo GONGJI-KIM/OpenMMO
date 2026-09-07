@@ -129,8 +129,17 @@ impl GameState {
         tz: i32,
         data: &[u8],
     ) -> std::io::Result<()> {
-        let tx = wrap_tile_x(tx);
         let _persistence = self.persistence_lock.lock().await;
+        self.save_terrain_heightmap_locked(tx, tz, data).await
+    }
+
+    pub(crate) async fn save_terrain_heightmap_locked(
+        &self,
+        tx: i32,
+        tz: i32,
+        data: &[u8],
+    ) -> std::io::Result<()> {
+        let tx = wrap_tile_x(tx);
         self.terrain_io.write_heightmap(tx, tz, data).await?;
         self.height_sampler.update_tile(tx, tz, data).await?;
         let owners: HashMap<_, _> = self

@@ -326,7 +326,10 @@
     const knownHeights = heights.filter(
       (height): height is number => height !== null
     )
-    const y = knownHeights.length ? Math.min(...knownHeights) : hit.point.y
+    const y = knownHeights.length
+      ? knownHeights.reduce((sum, height) => sum + height, 0) /
+        knownHeights.length
+      : hit.point.y
     let reason: string | null = null
     if (
       Math.hypot(

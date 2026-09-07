@@ -1358,6 +1358,9 @@ pub enum ServerMessage {
     HouseUpdated {
         house: housing::HouseData,
     },
+    HeightTilesInvalidated {
+        tiles: Vec<(i32, i32)>,
+    },
     TreeTilesInvalidated {
         tiles: Vec<(i32, i32)>,
     },

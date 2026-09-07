@@ -2,15 +2,231 @@ use crate::coords::world_to_tile;
 use crate::defaults::{self, VERTS_PER_SIDE};
 use crate::io::TerrainIO;
 use crate::tile_cache::{TileCache, TileCacheReadGuard, TILE_CACHE_CAPACITY};
+use onlinerpg_shared::worldgen::tile_bake::{HEIGHT_BIAS, HEIGHT_STEP};
+use std::collections::BTreeMap;
 
 /// Tile size in world units (must match client TERRAIN_TILE_SIZE).
 const TILE_SIZE: f32 = defaults::TILE_DIM as f32;
 
+pub type HeightRect = [f32; 4];
+
+#[derive(Debug)]
+pub struct HeightmapEdit {
+    pub tile_x: i32,
+    pub tile_z: i32,
+    pub data: Vec<u8>,
+}
+
 /// Decode a uint16 heightmap value to meters.
 /// Encoding: `round((meters + 500.0) / 0.05)` → range -500m to +3276m.
 /// Also the water field's surfaceY codec.
-pub(crate) fn decode_height(value: u16) -> f32 {
-    value as f32 * 0.05 - 500.0
+pub fn decode_height(value: u16) -> f32 {
+    value as f32 * HEIGHT_STEP - HEIGHT_BIAS
+}
+
+pub fn encode_height(value: f32) -> u16 {
+    ((value + HEIGHT_BIAS) / HEIGHT_STEP)
+        .round()
+        .clamp(0.0, 65535.0) as u16
+}
+
+fn point_in_rect([min_x, min_z, max_x, max_z]: HeightRect, x: f32, z: f32) -> bool {
+    x >= min_x && x <= max_x && z >= min_z && z <= max_z
+}
+
+fn decode_heightmap(data: Vec<u8>) -> Vec<u16> {
+    data.as_chunks::<2>()
+        .0
+        .iter()
+        .map(|bytes| u16::from_le_bytes(*bytes))
+        .collect()
+}
+
+fn heightmap_edit(tile_x: i32, tile_z: i32, heights: Vec<u16>) -> HeightmapEdit {
+    HeightmapEdit {
+        tile_x,
+        tile_z,
+        data: heights.into_iter().flat_map(u16::to_le_bytes).collect(),
+    }
+}
+
+fn tile_cell_bounds(tile_x: i32, tile_z: i32, rect: HeightRect) -> (i32, i32, i32, i32) {
+    let tile_min_x = tile_x as f32 * TILE_SIZE - TILE_SIZE * 0.5;
+    let tile_min_z = tile_z as f32 * TILE_SIZE - TILE_SIZE * 0.5;
+    let [min_x, min_z, max_x, max_z] = rect;
+    (
+        ((min_x - tile_min_x).floor() as i32).max(0),
+        ((max_x - tile_min_x).floor() as i32).min(VERTS_PER_SIDE as i32 - 1),
+        ((min_z - tile_min_z).floor() as i32).max(0),
+        ((max_z - tile_min_z).floor() as i32).min(VERTS_PER_SIDE as i32 - 1),
+    )
+}
+
+pub fn flatten_heightmap_tile(
+    heights: &mut [u16],
+    tile_x: i32,
+    tile_z: i32,
+    rect: HeightRect,
+    target_height: f32,
+    blend_radius: f32,
+    protected: &[HeightRect],
+) -> bool {
+    let [min_x, min_z, max_x, max_z] = rect;
+    let expanded = [
+        min_x - blend_radius,
+        min_z - blend_radius,
+        max_x + blend_radius,
+        max_z + blend_radius,
+    ];
+    let (start_x, end_x, start_z, end_z) = tile_cell_bounds(tile_x, tile_z, expanded);
+    let tile_min_x = tile_x as f32 * TILE_SIZE - TILE_SIZE * 0.5;
+    let tile_min_z = tile_z as f32 * TILE_SIZE - TILE_SIZE * 0.5;
+    let target_encoded = encode_height(target_height);
+    let mut changed = false;
+
+    for cell_z in start_z..=end_z {
+        for cell_x in start_x..=end_x {
+            let world_x = tile_min_x + cell_x as f32;
+            let world_z = tile_min_z + cell_z as f32;
+            if protected
+                .iter()
+                .any(|&protected_rect| point_in_rect(protected_rect, world_x, world_z))
+            {
+                continue;
+            }
+
+            let dx = (min_x - world_x).max(0.0).max(world_x - max_x);
+            let dz = (min_z - world_z).max(0.0).max(world_z - max_z);
+            let distance = dx.hypot(dz);
+            let index = cell_z as usize * VERTS_PER_SIDE + cell_x as usize;
+            let next = if distance == 0.0 {
+                target_encoded
+            } else if distance < blend_radius {
+                let t = distance / blend_radius;
+                let blend = 1.0 - t * t * (3.0 - 2.0 * t);
+                let current = decode_height(heights[index]);
+                encode_height(current + (target_height - current) * blend)
+            } else {
+                continue;
+            };
+            if heights[index] != next {
+                heights[index] = next;
+                changed = true;
+            }
+        }
+    }
+
+    changed
+}
+
+fn restore_heightmap_tile(
+    current: &mut [u16],
+    original: &[u16],
+    tile_x: i32,
+    tile_z: i32,
+    rect: HeightRect,
+) -> bool {
+    let (start_x, end_x, start_z, end_z) = tile_cell_bounds(tile_x, tile_z, rect);
+    let mut changed = false;
+    for cell_z in start_z..=end_z {
+        for cell_x in start_x..=end_x {
+            let index = cell_z as usize * VERTS_PER_SIDE + cell_x as usize;
+            if current[index] != original[index] {
+                current[index] = original[index];
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+pub async fn flatten_heightmap_rects(
+    terrain: &TerrainIO,
+    rects: &[HeightRect],
+    target_height: f32,
+    blend_radius: f32,
+    protected: &[HeightRect],
+) -> std::io::Result<Vec<HeightmapEdit>> {
+    let mut tiles = BTreeMap::<(i32, i32), (Vec<u16>, bool)>::new();
+
+    for &[min_x, min_z, max_x, max_z] in rects {
+        let rect = [min_x, min_z, max_x, max_z];
+        let expanded = [
+            min_x - blend_radius,
+            min_z - blend_radius,
+            max_x + blend_radius,
+            max_z + blend_radius,
+        ];
+
+        for tile_z in world_to_tile(expanded[1])..=world_to_tile(expanded[3]) {
+            for tile_x in world_to_tile(expanded[0])..=world_to_tile(expanded[2]) {
+                let key = (tile_x, tile_z);
+                if !tiles.contains_key(&key) {
+                    let raw = terrain.read_heightmap(tile_x, tile_z).await?;
+                    tiles.insert(key, (decode_heightmap(raw), false));
+                }
+
+                let (heights, changed) = tiles.get_mut(&key).expect("tile inserted above");
+                *changed |= flatten_heightmap_tile(
+                    heights,
+                    tile_x,
+                    tile_z,
+                    rect,
+                    target_height,
+                    blend_radius,
+                    protected,
+                );
+            }
+        }
+    }
+
+    Ok(tiles
+        .into_iter()
+        .filter(|(_, (_, changed))| *changed)
+        .map(|((tile_x, tile_z), (heights, _))| heightmap_edit(tile_x, tile_z, heights))
+        .collect())
+}
+
+pub async fn restore_heightmap_rects(
+    terrain: &TerrainIO,
+    rects: &[HeightRect],
+) -> std::io::Result<Vec<HeightmapEdit>> {
+    let mut tiles = BTreeMap::<(i32, i32), (Vec<u16>, Vec<u16>, bool)>::new();
+
+    for &[min_x, min_z, max_x, max_z] in rects {
+        for tile_z in world_to_tile(min_z)..=world_to_tile(max_z) {
+            for tile_x in world_to_tile(min_x)..=world_to_tile(max_x) {
+                let key = (tile_x, tile_z);
+                if !tiles.contains_key(&key) {
+                    let Some(original) = terrain.read_original_heightmap(tile_x, tile_z).await?
+                    else {
+                        continue;
+                    };
+                    let current = terrain.read_heightmap(tile_x, tile_z).await?;
+                    tiles.insert(
+                        key,
+                        (decode_heightmap(current), decode_heightmap(original), false),
+                    );
+                }
+                let Some((current, original, changed)) = tiles.get_mut(&key) else {
+                    continue;
+                };
+                *changed |= restore_heightmap_tile(
+                    current,
+                    original,
+                    tile_x,
+                    tile_z,
+                    [min_x, min_z, max_x, max_z],
+                );
+            }
+        }
+    }
+
+    Ok(tiles
+        .into_iter()
+        .filter(|(_, (_, _, changed))| *changed)
+        .map(|((tile_x, tile_z), (heights, _, _))| heightmap_edit(tile_x, tile_z, heights))
+        .collect())
 }
 
 /// Resolve a possibly-out-of-range tile-local vertex to its owning tile and

@@ -1,5 +1,10 @@
 use super::*;
-use onlinerpg_shared::{tree_format::TREE_V1_MAGIC, worldgen::vegetation::GRASS_V3_MAGIC};
+use onlinerpg_shared::{
+    housing::{HouseData, RoomType},
+    tree_format::TREE_V1_MAGIC,
+    worldgen::vegetation::GRASS_V3_MAGIC,
+};
+use onlinerpg_terrain::height::encode_height;
 use onlinerpg_terrain::land::{plot_addr, LandGrade, REGION_PLOTS};
 
 fn tile_position(world: f32) -> u16 {
@@ -16,6 +21,38 @@ fn vegetation(magic: u32, type_count: usize, x: f32, z: f32) -> Vec<u8> {
     data.extend_from_slice(&tile_position(z).to_le_bytes());
     data.extend_from_slice(&[0, 0]);
     data
+}
+
+fn sloped_heightmap() -> Vec<u8> {
+    let mut data = Vec::with_capacity(onlinerpg_terrain::defaults::HEIGHTMAP_SIZE);
+    for _z in 0..onlinerpg_terrain::defaults::VERTS_PER_SIDE {
+        for x in 0..onlinerpg_terrain::defaults::VERTS_PER_SIDE {
+            let encoded = encode_height(5.0 + x as f32 * 0.05);
+            data.extend_from_slice(&encoded.to_le_bytes());
+        }
+    }
+    data
+}
+
+fn assert_house_foundation_height(heightmap: &[u8], house: &HouseData) {
+    let target = encode_height(house.origin.y);
+    for room in house
+        .rooms
+        .iter()
+        .filter(|room| room.floor_level == 0 && room.room_type != RoomType::Stairwell)
+    {
+        for z in room.local_z..=room.local_z + i32::from(room.size_z) {
+            for x in room.local_x..=room.local_x + i32::from(room.size_x) {
+                let cell_x = (house.origin.x as i32 + x + 32) as usize;
+                let cell_z = (house.origin.z as i32 + z + 32) as usize;
+                let offset = (cell_z * onlinerpg_terrain::defaults::VERTS_PER_SIDE + cell_x) * 2;
+                assert_eq!(
+                    u16::from_le_bytes(heightmap[offset..offset + 2].try_into().unwrap()),
+                    target
+                );
+            }
+        }
+    }
 }
 
 async fn builder() -> (GameState, crate::auth::AuthService, i64, DirectRx) {
@@ -72,6 +109,10 @@ async fn house_scroll_builds_only_inside_the_owned_estate_and_persists_consumpti
         bag_item(4, onlinerpg_shared::landscaping::TOOLBOX_ITEM, 1),
     ];
     let grass = vegetation(GRASS_V3_MAGIC, 3, 6.0, 6.0);
+    let original_heightmap = sloped_heightmap();
+    game.save_terrain_heightmap(0, 0, &original_heightmap)
+        .await
+        .unwrap();
     game.terrain_io.write_grass(0, 0, &grass).await.unwrap();
     game.terrain_io
         .write_trees(0, 0, &vegetation(TREE_V1_MAGIC, 2, 6.0, 6.0))
@@ -119,7 +160,7 @@ async fn house_scroll_builds_only_inside_the_owned_estate_and_persists_consumpti
         (houses[0].rooms[0].size_x, houses[0].rooms[0].size_z),
         (4, 6)
     );
-    assert_eq!(houses[0].origin.y, 5.0);
+    assert!(houses[0].origin.y > 6.7 && houses[0].origin.y < 7.0);
     assert!(!game.inventories.read().await[&pid("Builder")]
         .bag
         .iter()
@@ -130,6 +171,10 @@ async fn house_scroll_builds_only_inside_the_owned_estate_and_persists_consumpti
         .any(|message| matches!(message, ServerMessage::HousePlacementResult { error: None })));
     assert!(messages.iter().any(|message| matches!(
         message,
+        ServerMessage::HeightTilesInvalidated { tiles } if tiles == &vec![(0, 0)]
+    )));
+    assert!(messages.iter().any(|message| matches!(
+        message,
         ServerMessage::TreeTilesInvalidated { tiles } if tiles == &vec![(0, 0)]
     )));
     assert!(messages.iter().any(|message| matches!(
@@ -138,6 +183,16 @@ async fn house_scroll_builds_only_inside_the_owned_estate_and_persists_consumpti
     )));
     let cleared_grass = game.terrain_io.read_grass(0, 0).await.unwrap().unwrap();
     let cleared_trees = game.terrain_io.read_trees(0, 0).await.unwrap().unwrap();
+    let flattened_heightmap = game.terrain_io.read_heightmap(0, 0).await.unwrap();
+    assert_house_foundation_height(&flattened_heightmap, &houses[0]);
+    assert_eq!(
+        game.terrain_io
+            .read_original_heightmap(0, 0)
+            .await
+            .unwrap()
+            .unwrap(),
+        original_heightmap
+    );
     assert_eq!(
         u32::from_le_bytes(cleared_grass[4..8].try_into().unwrap()),
         0
@@ -215,9 +270,80 @@ async fn house_scroll_builds_only_inside_the_owned_estate_and_persists_consumpti
     )));
     assert!(messages.iter().any(|message| matches!(
         message,
+        ServerMessage::HeightTilesInvalidated { tiles } if tiles == &vec![(0, 0)]
+    )));
+    assert!(messages.iter().any(|message| matches!(
+        message,
         ServerMessage::HouseDemolitionResult { house_id: removed, error: None }
             if removed == &house_id
     )));
+    assert_eq!(
+        game.terrain_io.read_heightmap(0, 0).await.unwrap(),
+        original_heightmap
+    );
+}
+
+#[tokio::test]
+async fn demolishing_a_house_reapplies_neighboring_house_flattening() {
+    let (game, auth, _, mut rx) = builder().await;
+    game.inventories
+        .write()
+        .await
+        .get_mut(&pid("Builder"))
+        .unwrap()
+        .bag = vec![
+        bag_item(2, "scroll_of_small_house", 1),
+        bag_item(3, "scroll_of_small_house", 1),
+        bag_item(4, onlinerpg_shared::landscaping::TOOLBOX_ITEM, 1),
+    ];
+    let original_heightmap = sloped_heightmap();
+    game.save_terrain_heightmap(0, 0, &original_heightmap)
+        .await
+        .unwrap();
+
+    game.place_house(
+        &pid("Builder"),
+        2,
+        Position {
+            x: 5.0,
+            y: 0.0,
+            z: 10.0,
+        },
+        1,
+        &auth,
+    )
+    .await;
+    game.place_house(
+        &pid("Builder"),
+        3,
+        Position {
+            x: 10.0,
+            y: 0.0,
+            z: 4.0,
+        },
+        0,
+        &auth,
+    )
+    .await;
+
+    let houses = game.housing_io.read_all_houses().await.unwrap();
+    assert_eq!(houses.len(), 2);
+    let removed = houses.iter().find(|house| house.origin.x == 5.0).unwrap();
+    let neighbor = houses
+        .iter()
+        .find(|house| house.origin.x == 10.0)
+        .unwrap()
+        .clone();
+    drain(&mut rx);
+
+    game.demolish_house(&pid("Builder"), removed.id.clone(), &auth)
+        .await;
+
+    let remaining = game.housing_io.read_all_houses().await.unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].id, neighbor.id);
+    let heightmap = game.terrain_io.read_heightmap(0, 0).await.unwrap();
+    assert_house_foundation_height(&heightmap, &neighbor);
 }
 
 #[tokio::test]

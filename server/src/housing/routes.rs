@@ -32,7 +32,7 @@ struct HousingRouteState {
 const TREE_HOUSE_MARGIN: f32 = 2.0;
 const GRASS_HOUSE_MARGIN: f32 = 1.0;
 
-fn house_foundation_rects(house: &HouseData, margin: f32) -> Vec<[f32; 4]> {
+pub(crate) fn house_foundation_rects(house: &HouseData, margin: f32) -> Vec<[f32; 4]> {
     house
         .rooms
         .iter()
@@ -135,6 +135,7 @@ async fn create_house(
         ServerMessage::HouseSpawned {
             house: house.clone(),
         },
+        &[],
         &tree_stats.changed_tiles,
         &grass_stats.changed_tiles,
     )
@@ -176,6 +177,7 @@ async fn update_house(
         ServerMessage::HouseUpdated {
             house: house.clone(),
         },
+        &[],
         &tree_stats.changed_tiles,
         &grass_stats.changed_tiles,
     )
@@ -326,6 +328,7 @@ pub(crate) async fn broadcast_house_change(
     game_state: &GameState,
     house: &HouseData,
     house_msg: ServerMessage,
+    changed_height_tiles: &[(i32, i32)],
     changed_tree_tiles: &[(i32, i32)],
     changed_grass_tiles: &[(i32, i32)],
 ) {
@@ -341,29 +344,24 @@ pub(crate) async fn broadcast_house_change(
         )
         .await;
 
-    if !changed_tree_tiles.is_empty() {
+    let invalidations = [
+        (!changed_height_tiles.is_empty()).then(|| ServerMessage::HeightTilesInvalidated {
+            tiles: changed_height_tiles.to_vec(),
+        }),
+        (!changed_tree_tiles.is_empty()).then(|| ServerMessage::TreeTilesInvalidated {
+            tiles: changed_tree_tiles.to_vec(),
+        }),
+        (!changed_grass_tiles.is_empty()).then(|| ServerMessage::GrassTilesInvalidated {
+            tiles: changed_grass_tiles.to_vec(),
+        }),
+    ];
+    for message in invalidations.into_iter().flatten() {
         game_state
             .send_direct_message_to_players_within_position(
                 &house.origin,
                 0,
                 EVENT_DELIVERY_RADIUS,
-                ServerMessage::TreeTilesInvalidated {
-                    tiles: changed_tree_tiles.to_vec(),
-                },
-                None,
-            )
-            .await;
-    }
-
-    if !changed_grass_tiles.is_empty() {
-        game_state
-            .send_direct_message_to_players_within_position(
-                &house.origin,
-                0,
-                EVENT_DELIVERY_RADIUS,
-                ServerMessage::GrassTilesInvalidated {
-                    tiles: changed_grass_tiles.to_vec(),
-                },
+                message,
                 None,
             )
             .await;

@@ -1,7 +1,7 @@
 use super::{
     auth_db,
     inventory::{consume_one, serialize_inventory, stack_into_bag, BagInsert},
-    GameState, EVENT_DELIVERY_RADIUS,
+    GameState,
 };
 use crate::{
     auth::AuthService,
@@ -14,10 +14,17 @@ use onlinerpg_shared::{
     landscaping::{owns_position, LandscapingTool, TOOLBOX_ITEM},
     shortest_world_delta_x, wrap_world_x,
 };
-use std::{collections::HashSet, sync::LazyLock};
+use onlinerpg_terrain::height::{
+    flatten_heightmap_rects, restore_heightmap_rects, HeightRect, HeightmapEdit,
+};
+use std::{
+    collections::{BTreeSet, HashSet},
+    sync::LazyLock,
+};
 
 const PLACEMENT_REACH_M: f32 = 30.0;
 const MAX_FOUNDATION_SLOPE_M: f32 = 1.0;
+const FOUNDATION_BLEND_RADIUS_M: f32 = 4.0;
 
 const HOUSE_SCROLLS: [(&str, &str); 5] = [
     (
@@ -208,7 +215,141 @@ fn distance_to_house(house: &HouseData, position: &Position) -> f32 {
         .fold(f32::INFINITY, f32::min)
 }
 
+fn expand_rect([min_x, min_z, max_x, max_z]: HeightRect, margin: f32) -> HeightRect {
+    [
+        min_x - margin,
+        min_z - margin,
+        max_x + margin,
+        max_z + margin,
+    ]
+}
+
+fn rects_overlap(a: HeightRect, b: HeightRect) -> bool {
+    a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1]
+}
+
 impl GameState {
+    async fn apply_heightmap_edits(
+        &self,
+        house_id: &str,
+        edits: Vec<HeightmapEdit>,
+        preserve_original: bool,
+    ) -> Vec<(i32, i32)> {
+        let mut changed = Vec::new();
+        for edit in edits {
+            let result = async {
+                if preserve_original {
+                    self.terrain_io
+                        .ensure_original_heightmap(edit.tile_x, edit.tile_z)
+                        .await?;
+                }
+                self.save_terrain_heightmap_locked(edit.tile_x, edit.tile_z, &edit.data)
+                    .await
+            }
+            .await;
+            match result {
+                Ok(()) => changed.push((edit.tile_x, edit.tile_z)),
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        %house_id,
+                        tile_x = edit.tile_x,
+                        tile_z = edit.tile_z,
+                        "Failed to update terrain for house"
+                    );
+                }
+            }
+        }
+        changed
+    }
+
+    async fn restore_demolished_house_terrain(&self, house: &HouseData) -> Vec<(i32, i32)> {
+        let restored_areas =
+            crate::housing::routes::house_foundation_rects(house, FOUNDATION_BLEND_RADIUS_M);
+        let restore_edits = match restore_heightmap_rects(&self.terrain_io, &restored_areas).await {
+            Ok(edits) => edits,
+            Err(error) => {
+                tracing::warn!(%error, house_id = %house.id, "Failed to restore demolished house terrain");
+                return Vec::new();
+            }
+        };
+        let mut changed: BTreeSet<_> = self
+            .apply_heightmap_edits(&house.id, restore_edits, false)
+            .await
+            .into_iter()
+            .collect();
+        if changed.is_empty() {
+            return Vec::new();
+        }
+
+        let remaining = match self.housing_io.read_all_houses().await {
+            Ok(houses) => houses,
+            Err(error) => {
+                tracing::warn!(%error, house_id = %house.id, "Failed to load houses after terrain restoration");
+                return changed.into_iter().collect();
+            }
+        };
+        let foundations = remaining
+            .iter()
+            .map(|other| {
+                (
+                    other,
+                    crate::housing::routes::house_foundation_rects(other, 0.0),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        for (remaining_house, rects) in &foundations {
+            let affected = rects
+                .iter()
+                .copied()
+                .filter(|rect| {
+                    let influence = expand_rect(*rect, FOUNDATION_BLEND_RADIUS_M);
+                    restored_areas
+                        .iter()
+                        .any(|restored| rects_overlap(influence, *restored))
+                })
+                .collect::<Vec<_>>();
+            if affected.is_empty() {
+                continue;
+            }
+            let protected = foundations
+                .iter()
+                .filter(|(other, _)| other.id != remaining_house.id)
+                .flat_map(|(_, rects)| rects.iter().copied())
+                .filter(|rect| {
+                    affected.iter().any(|target| {
+                        rects_overlap(*rect, expand_rect(*target, FOUNDATION_BLEND_RADIUS_M))
+                    })
+                })
+                .collect::<Vec<_>>();
+            let edits = match flatten_heightmap_rects(
+                &self.terrain_io,
+                &affected,
+                remaining_house.origin.y,
+                FOUNDATION_BLEND_RADIUS_M,
+                &protected,
+            )
+            .await
+            {
+                Ok(edits) => edits,
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        house_id = %remaining_house.id,
+                        "Failed to reapply neighboring house terrain"
+                    );
+                    continue;
+                }
+            };
+            changed.extend(
+                self.apply_heightmap_edits(&remaining_house.id, edits, false)
+                    .await,
+            );
+        }
+        changed.into_iter().collect()
+    }
+
     pub async fn try_start_house_placement(
         &self,
         player_id: &PlayerId,
@@ -403,15 +544,17 @@ impl GameState {
             drop(inventories);
             self.send_inventory_snapshot(player_id, updated).await;
         }
+        let changed_height_tiles = self.restore_demolished_house_terrain(&house).await;
         self.passability_remove_house(house_id).await;
-        self.send_direct_message_to_players_within_position(
-            &house.origin,
-            0,
-            EVENT_DELIVERY_RADIUS,
+        crate::housing::routes::broadcast_house_change(
+            self,
+            &house,
             ServerMessage::HouseRemoved {
                 house_id: house_id.to_string(),
             },
-            None,
+            &changed_height_tiles,
+            &[],
+            &[],
         )
         .await;
         Ok(())
@@ -494,6 +637,8 @@ impl GameState {
         let cells = foundation_cells(&house);
         let mut min_height = f32::INFINITY;
         let mut max_height = f32::NEG_INFINITY;
+        let mut height_sum = 0.0;
+        let cell_count = cells.len();
         for (cell_x, cell_z) in cells {
             let Some((height, depth)) = self.ground_and_depth_at(cell_x, cell_z).await else {
                 return Err("Terrain is unavailable at that position.".to_string());
@@ -503,11 +648,12 @@ impl GameState {
             }
             min_height = min_height.min(height);
             max_height = max_height.max(height);
+            height_sum += height;
         }
         if max_height - min_height > MAX_FOUNDATION_SLOPE_M {
             return Err("The ground is too uneven for this house.".to_string());
         }
-        house.origin.y = min_height;
+        house.origin.y = height_sum / cell_count as f32;
         house.owner_id = character_id.to_string();
         house.source_scroll_id = Some(item_id.clone());
         validate_house(&house)?;
@@ -519,6 +665,32 @@ impl GameState {
         house.id = next_house_id(cx, cz, &neighbors);
         validate_house_neighbors(&house, &neighbors)
             .map_err(|_| "That position overlaps another house.".to_string())?;
+        let foundation_rects = crate::housing::routes::house_foundation_rects(&house, 0.0);
+        let foundation_influence = foundation_rects
+            .iter()
+            .map(|rect| expand_rect(*rect, FOUNDATION_BLEND_RADIUS_M))
+            .collect::<Vec<_>>();
+        let protected_rects = neighbors
+            .iter()
+            .flat_map(|neighbor| crate::housing::routes::house_foundation_rects(neighbor, 0.0))
+            .filter(|rect| {
+                foundation_influence
+                    .iter()
+                    .any(|influence| rects_overlap(*influence, *rect))
+            })
+            .collect::<Vec<_>>();
+        let height_edits = flatten_heightmap_rects(
+            &self.terrain_io,
+            &foundation_rects,
+            house.origin.y,
+            FOUNDATION_BLEND_RADIUS_M,
+            &protected_rects,
+        )
+        .await
+        .map_err(|error| {
+            tracing::warn!(%error, "Failed to prepare terrain for house placement");
+            "The terrain could not be prepared for this house.".to_string()
+        })?;
 
         let character = self
             .get_player_save_data(player_id)
@@ -559,6 +731,9 @@ impl GameState {
         *inventory = updated.clone();
         drop(inventories);
         self.send_inventory_snapshot(player_id, updated).await;
+        let changed_height_tiles = self
+            .apply_heightmap_edits(&house.id, height_edits, true)
+            .await;
         self.passability_add_house(&house).await;
         let (tree_result, grass_result) = tokio::join!(
             crate::housing::routes::remove_house_trees(&self.terrain_io, &house),
@@ -584,6 +759,7 @@ impl GameState {
             ServerMessage::HouseSpawned {
                 house: house.clone(),
             },
+            &changed_height_tiles,
             &changed_tree_tiles,
             &changed_grass_tiles,
         )

@@ -175,7 +175,8 @@ ServerMessage::HousePlaceRejected { reason: String }
 4. **재료**: `BuildCost` 전부 보유. 확인 후 마지막에 소비 (검증 실패 시 손실
    없음).
 5. `origin`을 1m 그리드에 스냅하고 템플릿 `rooms`를 붙여 `HouseData`를 만든다.
-   `origin.y`는 서버 지형 높이에서 정한다. 클라 값을 믿지 않는다.
+   `origin.y`는 0층 풋프린트의 서버 지형 높이 평균으로 정한다. 클라 값을 믿지
+   않는다.
 6. `validate_house` + `validate_house_neighbors` (기존).
 7. 에디터에는 없던 규칙:
    - **경사**: 0층 풋프린트 셀의 지형 높이 최대-최소 ≤ 1.0m. 넘으면 "땅이
@@ -189,8 +190,10 @@ ServerMessage::HousePlaceRejected { reason: String }
      마진 포함으로 확장.
    - **주기 제한**: 캐릭터당 1분에 5회 시도. 미리보기 스팸이 아니라 확정 요청
      기준.
-8. 설계도 1개 + 재료 소비, `write_house`, `passability_add_house`, 나무 제거,
-   브로드캐스트. 기존 `create_house` 경로를 함수로 빼서 REST와 공유한다.
+8. 설계도 1개 + 재료 소비, `write_house`, 풋프린트 평탄화, `passability_add_house`,
+   나무 제거, 브로드캐스트. 평탄화는 내부를 `origin.y`로 맞추고 바깥 4m를
+   smoothstep으로 연결하며, 원본 높이맵을 보존하고 변경 타일을 클라이언트에
+   무효화한다.
 
 ## 소유
 
@@ -215,8 +218,9 @@ ServerMessage::HousePlaceRejected { reason: String }
 - 서버는 `owner_id → house_id` 인덱스를 메모리에 둔다 (부팅 시 전체 집 로드,
   이미 `read_all_houses`가 있다).
 - **철거**: Landscaper's Toolbox의 `House` 탭에서 월드의 자기 집을 마우스로
-  클릭하고 확인 후 실행한다. 환급 없이 집 파일과 통행 충돌을 삭제하고
-  `HouseRemoved`를 브로드캐스트한다.
+  클릭하고 확인 후 실행한다. 집 파일과 통행 충돌을 삭제하고 건축 스크롤을
+  돌려준다. 보존된 원본 높이맵으로 기초와 완충 영역을 복원한 뒤, 범위가 겹치는
+  다른 집의 평탄화를 다시 적용하고 `HouseRemoved`를 브로드캐스트한다.
 - **방치 정리**: 영지 쇠퇴 단계(LAND_SYSTEM.md)가 해제에 도달하면 집도 삭제.
   영지 없이 먼저 배포한다면 소유자 `last_seen_at` 90일 기준 일일 배치로 대신.
   공용 집(빈 `owner_id`)은 대상 아님.
@@ -233,6 +237,8 @@ ServerMessage::HousePlaceRejected { reason: String }
 ## 프로토콜
 
 - `ClientMessage::PlaceHouse`, `ServerMessage::HousePlaceRejected` 추가.
+- 서버 평탄화 뒤 `ServerMessage::HeightTilesInvalidated`로 주변 클라이언트의
+  높이맵 캐시와 지형 geometry를 갱신한다.
 - `ItemInstance.template_id` 추가 (`serde(default)`, 구 클라 호환).
 - 툴팁용으로 `ServerMessage::HouseTemplateCatalog { templates: Vec<TemplateSummary> }`
   를 입장 시 1회 전송. 이름·방 수·층수·비용만. 방 데이터는 사용 시점에

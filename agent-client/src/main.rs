@@ -521,6 +521,7 @@ pub fn msg_name(msg: &onlinerpg_shared::ServerMessage) -> &'static str {
         ServerMessage::HousePlacementResult { .. } => "HousePlacementResult",
         ServerMessage::HouseDemolitionResult { .. } => "HouseDemolitionResult",
         ServerMessage::HouseUpdated { .. } => "HouseUpdated",
+        ServerMessage::HeightTilesInvalidated { .. } => "HeightTilesInvalidated",
         ServerMessage::TreeTilesInvalidated { .. } => "TreeTilesInvalidated",
         ServerMessage::GrassTilesInvalidated { .. } => "GrassTilesInvalidated",
         ServerMessage::HouseRemoved { .. } => "HouseRemoved",

@@ -134,6 +134,7 @@ import {
 } from '../stores/friendStore'
 import { enqueueConsent } from '../stores/consentQueue'
 import {
+  editorHeightManager,
   editorTreeDataManager,
   editorGrassDataManager,
   editorSplatManager,
@@ -498,6 +499,8 @@ function syncOwnFloor(floorLevel: number | undefined, x: number, z: number) {
   dungeonManager.syncFromFloorLevel(floor, x, z)
   playerVisualFloorLevel.set(Math.max(0, floor))
 }
+
+let pendingHeightTileRefresh: Promise<void> = Promise.resolve()
 
 export function handleServerMessage(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1590,15 +1593,36 @@ export function handleServerMessage(
       housingManager.handleRemoteHouseSpawned(data.house)
       break
 
+    case 'HeightTilesInvalidated': {
+      const heightManager = get(editorHeightManager)
+      if (heightManager) {
+        pendingHeightTileRefresh = pendingHeightTileRefresh
+          .catch(() => {})
+          .then(() => heightManager.refreshTiles(data.tiles ?? []))
+        void pendingHeightTileRefresh.catch((error) =>
+          console.warn('Failed to refresh terrain height tiles:', error)
+        )
+      }
+      break
+    }
+
     case 'TreeTilesInvalidated': {
       const treeDataManager = get(editorTreeDataManager)
-      if (treeDataManager) void treeDataManager.refreshTiles(data.tiles ?? [])
+      if (treeDataManager) {
+        void pendingHeightTileRefresh
+          .catch(() => {})
+          .then(() => treeDataManager.refreshTiles(data.tiles ?? []))
+      }
       break
     }
 
     case 'GrassTilesInvalidated': {
       const grassDataManager = get(editorGrassDataManager)
-      if (grassDataManager) void grassDataManager.refreshTiles(data.tiles ?? [])
+      if (grassDataManager) {
+        void pendingHeightTileRefresh
+          .catch(() => {})
+          .then(() => grassDataManager.refreshTiles(data.tiles ?? []))
+      }
       break
     }
 

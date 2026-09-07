@@ -32,19 +32,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+use onlinerpg_shared::housing::{HouseData, RoomData};
 #[cfg(test)]
 use onlinerpg_shared::worldgen::vegetation::{
     GRASS_V3_BYTES_PER_INSTANCE, GRASS_V3_HEADER_BYTES, GRASS_V3_MAGIC,
 };
-use onlinerpg_shared::{
-    housing::{HouseData, RoomData},
-    worldgen::tile_bake::{HEIGHT_BIAS, HEIGHT_STEP},
-};
+#[cfg(test)]
+use onlinerpg_terrain::defaults::TILE_DIM;
+#[cfg(test)]
+use onlinerpg_terrain::height::{decode_height, encode_height};
 use onlinerpg_terrain::{
-    coords,
-    defaults::{HEIGHTMAP_SIZE, TILE_DIM, VERTS_PER_SIDE},
-    grass::filter_grass_v3_bytes_in_rects,
-    trees::TreeExclusionRect,
+    coords, defaults::HEIGHTMAP_SIZE, grass::filter_grass_v3_bytes_in_rects,
+    height::flatten_heightmap_tile, trees::TreeExclusionRect,
 };
 
 use crate::prune_house_trees::{
@@ -78,22 +77,6 @@ pub struct ApplyOptions {
 /// World-space AABB: `[min_x, min_z, max_x, max_z]`.
 type Rect = [f32; 4];
 
-/// Half a tile in world units — a tile `t` covers `[t*TILE - HALF, t*TILE + HALF)`.
-const TILE_HALF: f32 = TILE_DIM as f32 / 2.0;
-
-/// Decode a uint16 heightmap sample to meters (inverse of `encode_height`).
-fn decode_height(v: u16) -> f32 {
-    v as f32 * HEIGHT_STEP - HEIGHT_BIAS
-}
-
-/// Encode meters to a clamped uint16 heightmap sample, matching the baker's
-/// `encode_heightmap` and the client's `encodeHeight`.
-fn encode_height(m: f32) -> u16 {
-    ((m + HEIGHT_BIAS) / HEIGHT_STEP)
-        .round()
-        .clamp(0.0, 65535.0) as u16
-}
-
 /// World-space rect of a ground-floor room (no margin).
 fn room_rect(house: &HouseData, room: &RoomData) -> Rect {
     let min_x = house.origin.x + room.local_x as f32;
@@ -104,18 +87,6 @@ fn room_rect(house: &HouseData, room: &RoomData) -> Rect {
         min_x + room.size_x as f32,
         min_z + room.size_z as f32,
     ]
-}
-
-fn point_in_rect([min_x, min_z, max_x, max_z]: Rect, x: f32, z: f32) -> bool {
-    x >= min_x && x <= max_x && z >= min_z && z <= max_z
-}
-
-fn point_in_any(rects: &[Rect], x: f32, z: f32) -> bool {
-    rects.iter().any(|&r| point_in_rect(r, x, z))
-}
-
-fn tile_min_world(t: i32) -> f32 {
-    t as f32 * TILE_DIM as f32 - TILE_HALF
 }
 
 // ===================================================================
@@ -181,9 +152,7 @@ impl<'a> HeightEditor<'a> {
         Ok(true)
     }
 
-    /// Flatten one room rect to `target`, with a smoothstep blend skirt of
-    /// `blend` metres, skipping cells inside any `protected` rect. Ported
-    /// vertex-for-vertex from `flattenArea` in `terrain-height-brushes.ts`.
+    /// Flatten one room rect to `target`, skipping protected cells.
     fn flatten_room(
         &mut self,
         rect: Rect,
@@ -202,55 +171,13 @@ impl<'a> HeightEditor<'a> {
         let min_tz = coords::world_to_tile(exp_min_z);
         let max_tz = coords::world_to_tile(exp_max_z);
 
-        let target_encoded = encode_height(target);
-        let verts = VERTS_PER_SIDE as i32;
-
         for tz in min_tz..=max_tz {
             for tx in min_tx..=max_tx {
                 if !self.load(tx, tz)? {
                     continue;
                 }
-                let tile_min_x = tile_min_world(tx);
-                let tile_min_z = tile_min_world(tz);
-
-                let start_cx = ((exp_min_x - tile_min_x).floor() as i32).max(0);
-                let end_cx = ((exp_max_x - tile_min_x).floor() as i32).min(verts - 1);
-                let start_cz = ((exp_min_z - tile_min_z).floor() as i32).max(0);
-                let end_cz = ((exp_max_z - tile_min_z).floor() as i32).min(verts - 1);
-
                 let data = self.cache.get_mut(&(tx, tz)).expect("tile loaded above");
-                let mut touched = false;
-
-                for cz in start_cz..=end_cz {
-                    for cx in start_cx..=end_cx {
-                        let world_cx = tile_min_x + cx as f32;
-                        let world_cz = tile_min_z + cz as f32;
-
-                        if point_in_any(protected, world_cx, world_cz) {
-                            continue;
-                        }
-
-                        // Distance from the rect edges (0 inside).
-                        let dx = (min_x - world_cx).max(0.0).max(world_cx - max_x);
-                        let dz = (min_z - world_cz).max(0.0).max(world_cz - max_z);
-                        let dist = (dx * dx + dz * dz).sqrt();
-
-                        let idx = cz as usize * VERTS_PER_SIDE + cx as usize;
-
-                        if dist <= 0.0 {
-                            data[idx] = target_encoded;
-                            touched = true;
-                        } else if dist < blend {
-                            let t = dist / blend;
-                            let b = 1.0 - t * t * (3.0 - 2.0 * t);
-                            let cur = decode_height(data[idx]);
-                            data[idx] = encode_height(cur + (target - cur) * b);
-                            touched = true;
-                        }
-                    }
-                }
-
-                if touched {
+                if flatten_heightmap_tile(data, tx, tz, rect, target, blend, protected) {
                     self.dirty.insert((tx, tz));
                 }
             }
