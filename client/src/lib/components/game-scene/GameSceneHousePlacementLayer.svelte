@@ -10,6 +10,7 @@
     houseDemolitionMode,
     housePlacementMode,
     requestHouseDemolitionConfirmation,
+    rotateHousePlacement,
     stopHouseInteraction,
   } from '../../stores/housePlacementStore'
   import {
@@ -95,16 +96,41 @@
     return offsets
   }
 
-  function overlapsExisting(house: HouseData, x: number, z: number) {
-    return house.rooms.some((room) =>
-      housingManager.checkOverlap(
+  function rotateLocalBounds(
+    localX: number,
+    localZ: number,
+    sizeX: number,
+    sizeZ: number,
+    quarterTurns: number
+  ) {
+    for (let turn = 0; turn < quarterTurns; turn++) {
+      ;[localX, localZ, sizeX, sizeZ] = [localZ, -localX - sizeX, sizeZ, sizeX]
+    }
+    return { localX, localZ, sizeX, sizeZ }
+  }
+
+  function overlapsExisting(
+    house: HouseData,
+    x: number,
+    z: number,
+    quarterTurns: number
+  ) {
+    return house.rooms.some((source) => {
+      const room = rotateLocalBounds(
+        source.localX,
+        source.localZ,
+        source.sizeX,
+        source.sizeZ,
+        quarterTurns
+      )
+      return housingManager.checkOverlap(
         x + room.localX,
         z + room.localZ,
         room.sizeX,
         room.sizeZ,
-        room.floorLevel
+        source.floorLevel
       )
-    )
+    })
   }
 
   function disposePreview() {
@@ -285,10 +311,16 @@
     const x = wrapWorldX(Math.round(hit.point.x))
     const z = Math.round(hit.point.z)
     const cells = previewFoundationOffsets.map(
-      ([localX, localZ]): [number, number] => [
-        wrapWorldX(x + localX),
-        z + localZ,
-      ]
+      ([localX, localZ]): [number, number] => {
+        const { localX: rotatedX, localZ: rotatedZ } = rotateLocalBounds(
+          localX,
+          localZ,
+          0,
+          0,
+          mode.quarterTurns
+        )
+        return [wrapWorldX(x + rotatedX), z + rotatedZ]
+      }
     )
     const heights = cells.map(([cx, cz]) => heightManager.groundYOrNull(cx, cz))
     const knownHeights = heights.filter(
@@ -313,7 +345,7 @@
       Math.max(...knownHeights) - Math.min(...knownHeights) > 1
     )
       reason = 'The ground is too uneven for this house'
-    else if (overlapsExisting(mode.house, x, z))
+    else if (overlapsExisting(mode.house, x, z, mode.quarterTurns))
       reason = 'That position overlaps another house'
     preview.visible = true
     preview.position.set(x, y, z)
@@ -346,6 +378,7 @@
     }
     if (previewInstanceId !== mode.instanceId)
       buildPreview(mode.house, mode.instanceId)
+    if (preview) preview.rotation.y = mode.quarterTurns * (Math.PI / 2)
   })
 
   onMount(() => {
@@ -369,7 +402,11 @@
         const current = get(housePlacementMode)
         if (!current?.valid || !current.target || current.pending) return
         housePlacementMode.set({ ...current, pending: true, error: null })
-        networkManager.sendPlaceHouse(current.instanceId, current.target)
+        networkManager.sendPlaceHouse(
+          current.instanceId,
+          current.target,
+          current.quarterTurns
+        )
         return
       }
       updateDemolitionTarget()
@@ -379,8 +416,19 @@
       if (!house) return
       requestHouseDemolitionConfirmation(house)
     }
-    const escape = (event: KeyboardEvent) => {
+    const keydown = (event: KeyboardEvent) => {
       if (get(houseDemolitionConfirmation)) return
+      if (
+        event.code === 'KeyR' &&
+        get(housePlacementMode) &&
+        !get(cameraRotationEnabled)
+      ) {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        rotateHousePlacement()
+        updatePreview()
+        return
+      }
       if (
         event.code !== 'Escape' ||
         (!get(housePlacementMode) && !get(houseDemolitionMode))
@@ -394,12 +442,12 @@
     canvas.addEventListener('pointermove', move)
     canvas.addEventListener('pointerleave', leave)
     canvas.addEventListener('mousedown', click, true)
-    window.addEventListener('keydown', escape, true)
+    window.addEventListener('keydown', keydown, true)
     return () => {
       canvas.removeEventListener('pointermove', move)
       canvas.removeEventListener('pointerleave', leave)
       canvas.removeEventListener('mousedown', click, true)
-      window.removeEventListener('keydown', escape, true)
+      window.removeEventListener('keydown', keydown, true)
     }
   })
 

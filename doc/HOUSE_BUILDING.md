@@ -158,7 +158,7 @@ REST `POST /api/housing`은 관리자 전용이라 플레이어는 쓸 수 없�
 메시지를 추가한다.
 
 ```rust
-ClientMessage::PlaceHouse { instance_id: u64, origin: Position }
+ClientMessage::PlaceHouse { instance_id: u64, origin: Position, quarter_turns: u8 }
 ServerMessage::HousePlaceRejected { reason: String }
 ```
 

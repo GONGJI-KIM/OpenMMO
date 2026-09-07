@@ -68,11 +68,11 @@ async fn estate_architect_sells_landscaping_supplies() {
     let mut supplies = vec!["wooden_fence", onlinerpg_shared::landscaping::TOOLBOX_ITEM];
     supplies.extend(onlinerpg_shared::landscaping::PALETTE_ITEMS.map(|(_, id)| id));
     supplies.extend([
-        "scroll_of_rica_house",
-        "scroll_of_karl_house",
-        "scroll_of_aldwin_house",
-        "scroll_of_inn",
-        "scroll_of_rowan_house",
+        "scroll_of_medium_two_story_house",
+        "scroll_of_small_house",
+        "scroll_of_small_two_story_house",
+        "scroll_of_large_two_story_house",
+        "scroll_of_medium_house",
     ]);
     match rx.try_recv().unwrap() {
         ServerMessage::ShopState { catalog, .. } => {

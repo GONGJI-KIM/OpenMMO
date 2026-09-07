@@ -474,6 +474,7 @@ pub enum ClientMessage {
     PlaceHouse {
         instance_id: u64,
         origin: Position,
+        quarter_turns: u8,
     },
     ModifyRoom {
         house_id: String,

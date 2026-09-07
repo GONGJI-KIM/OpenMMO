@@ -403,6 +403,7 @@ pub(crate) mod test_fixtures {
         HouseData {
             id: "r+00_+00_1".into(),
             owner_id: "test".into(),
+            source_scroll_id: None,
             origin: Position { x, y: 0.0, z },
             rooms,
             passability: vec![],

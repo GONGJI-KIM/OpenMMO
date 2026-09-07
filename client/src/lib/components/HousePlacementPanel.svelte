@@ -7,6 +7,7 @@
     houseDemolitionMode,
     houseDemolitionPending,
     housePlacementMode,
+    rotateHousePlacement,
     startHouseDemolitionSelection,
     stopHouseDemolitionSelection,
     stopHousePlacement,
@@ -60,7 +61,14 @@
             $housePlacementMode.error ??
             'Click to build here')}
       </span>
-      <small>Move the pointer · Left-click to build · Esc to cancel</small>
+      <small
+        >Move the pointer · R to rotate · Left-click to build · Esc to cancel</small
+      >
+      <button
+        disabled={$housePlacementMode.pending}
+        onclick={rotateHousePlacement}
+        >Rotate 90° · {$housePlacementMode.quarterTurns * 90}°</button
+      >
       <button onclick={stopHousePlacement}>Cancel placement</button>
     </section>
   {/if}
@@ -78,14 +86,15 @@
       >
     {:else}
       <small
-        >Select your house directly in the world. No materials are refunded.</small
+        >Select your house directly in the world. Its construction scroll will
+        be returned.</small
       >
       <button
         class="danger"
         disabled={$housePlacementMode !== null ||
           $houseDemolitionPending !== null}
         onclick={startHouseDemolitionSelection}
-        >{$houseDemolitionPending ? 'Demolishing…' : 'Select house'}</button
+        >{$houseDemolitionPending ? 'Demolishing…' : 'Demolish House'}</button
       >
     {/if}
   </section>

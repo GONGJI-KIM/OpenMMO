@@ -38,10 +38,12 @@
       <span>{house.origin.x.toFixed(0)}, {house.origin.z.toFixed(0)}</span>
     </div>
     <div class="warning">
-      <strong>This cannot be undone.</strong>
-      <span
-        >The house will be removed permanently. No materials are refunded.</span
-      >
+      {#if house.sourceScrollId}
+        <span>The construction scroll will be returned to your bag.</span>
+      {:else}
+        <strong>This cannot be undone.</strong>
+        <span>The house will be removed permanently.</span>
+      {/if}
     </div>
     <div class="actions">
       <button class="secondary" onclick={onCancel}>Keep house</button>

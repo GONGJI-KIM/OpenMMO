@@ -68,7 +68,7 @@ async fn house_scroll_builds_only_inside_the_owned_estate_and_persists_consumpti
         .get_mut(&pid("Builder"))
         .unwrap()
         .bag = vec![
-        bag_item(2, "scroll_of_karl_house", 1),
+        bag_item(2, "scroll_of_small_house", 1),
         bag_item(4, onlinerpg_shared::landscaping::TOOLBOX_ITEM, 1),
     ];
     let grass = vegetation(GRASS_V3_MAGIC, 3, 6.0, 6.0);
@@ -102,19 +102,28 @@ async fn house_scroll_builds_only_inside_the_owned_estate_and_persists_consumpti
         Position {
             x: 5.0,
             y: -100.0,
-            z: 5.0,
+            z: 10.0,
         },
+        1,
         &auth,
     )
     .await;
     let houses = game.housing_io.read_all_houses().await.unwrap();
     assert_eq!(houses.len(), 1);
     assert_eq!(houses[0].owner_id, character_id.to_string());
+    assert_eq!(
+        houses[0].source_scroll_id.as_deref(),
+        Some("scroll_of_small_house")
+    );
+    assert_eq!(
+        (houses[0].rooms[0].size_x, houses[0].rooms[0].size_z),
+        (4, 6)
+    );
     assert_eq!(houses[0].origin.y, 5.0);
     assert!(!game.inventories.read().await[&pid("Builder")]
         .bag
         .iter()
-        .any(|item| item.item_def_id == "scroll_of_karl_house"));
+        .any(|item| item.item_def_id == "scroll_of_small_house"));
     let messages = drain(&mut rx);
     assert!(messages
         .iter()
@@ -155,7 +164,7 @@ async fn house_scroll_builds_only_inside_the_owned_estate_and_persists_consumpti
         .get_mut(&pid("Builder"))
         .unwrap()
         .bag
-        .push(bag_item(3, "scroll_of_karl_house", 1));
+        .push(bag_item(3, "scroll_of_small_house", 1));
     game.place_house(
         &pid("Builder"),
         3,
@@ -164,6 +173,7 @@ async fn house_scroll_builds_only_inside_the_owned_estate_and_persists_consumpti
             y: 5.0,
             z: 5.0,
         },
+        0,
         &auth,
     )
     .await;
@@ -176,9 +186,28 @@ async fn house_scroll_builds_only_inside_the_owned_estate_and_persists_consumpti
     )));
 
     let house_id = houses[0].id.clone();
+    let scrolls_before = game.inventories.read().await[&pid("Builder")]
+        .bag
+        .iter()
+        .filter(|item| item.item_def_id == "scroll_of_small_house")
+        .count();
     game.demolish_house(&pid("Builder"), house_id.clone(), &auth)
         .await;
     assert!(game.housing_io.read_all_houses().await.unwrap().is_empty());
+    let scrolls_after = game.inventories.read().await[&pid("Builder")]
+        .bag
+        .iter()
+        .filter(|item| item.item_def_id == "scroll_of_small_house")
+        .count();
+    assert_eq!(scrolls_after, scrolls_before + 1);
+    assert_eq!(
+        auth.load_inventory(character_id)
+            .unwrap()
+            .iter()
+            .filter(|item| item.item_def_id == "scroll_of_small_house")
+            .count(),
+        scrolls_before + 1
+    );
     let messages = drain(&mut rx);
     assert!(messages.iter().any(|message| matches!(
         message,
@@ -192,6 +221,53 @@ async fn house_scroll_builds_only_inside_the_owned_estate_and_persists_consumpti
 }
 
 #[tokio::test]
+async fn house_demolition_keeps_house_when_the_scroll_is_too_heavy() {
+    let (game, auth, _, mut rx) = builder().await;
+    game.inventories
+        .write()
+        .await
+        .get_mut(&pid("Builder"))
+        .unwrap()
+        .bag = vec![
+        bag_item(2, "scroll_of_small_house", 1),
+        bag_item(4, onlinerpg_shared::landscaping::TOOLBOX_ITEM, 1),
+    ];
+    game.place_house(
+        &pid("Builder"),
+        2,
+        Position {
+            x: 5.0,
+            y: 5.0,
+            z: 5.0,
+        },
+        0,
+        &auth,
+    )
+    .await;
+    let house_id = game.housing_io.read_all_houses().await.unwrap()[0]
+        .id
+        .clone();
+    game.inventories
+        .write()
+        .await
+        .get_mut(&pid("Builder"))
+        .unwrap()
+        .bag
+        .push(bag_item(5, "stone_hearth", 1));
+    drain(&mut rx);
+
+    game.demolish_house(&pid("Builder"), house_id.clone(), &auth)
+        .await;
+
+    assert_eq!(game.housing_io.read_all_houses().await.unwrap().len(), 1);
+    assert!(drain(&mut rx).iter().any(|message| matches!(
+        message,
+        ServerMessage::HouseDemolitionResult { house_id: rejected, error: Some(reason) }
+            if rejected == &house_id && reason.contains("too heavy")
+    )));
+}
+
+#[tokio::test]
 async fn house_placement_requires_the_toolbox_on_the_authoritative_request() {
     let (game, auth, _, mut rx) = builder().await;
     game.inventories
@@ -199,7 +275,7 @@ async fn house_placement_requires_the_toolbox_on_the_authoritative_request() {
         .await
         .get_mut(&pid("Builder"))
         .unwrap()
-        .bag = vec![bag_item(2, "scroll_of_karl_house", 1)];
+        .bag = vec![bag_item(2, "scroll_of_small_house", 1)];
 
     game.place_house(
         &pid("Builder"),
@@ -209,6 +285,7 @@ async fn house_placement_requires_the_toolbox_on_the_authoritative_request() {
             y: 5.0,
             z: 5.0,
         },
+        0,
         &auth,
     )
     .await;
@@ -230,7 +307,7 @@ async fn house_demolition_rejects_a_non_owner() {
         .get_mut(&pid("Builder"))
         .unwrap()
         .bag = vec![
-        bag_item(2, "scroll_of_karl_house", 1),
+        bag_item(2, "scroll_of_small_house", 1),
         bag_item(4, onlinerpg_shared::landscaping::TOOLBOX_ITEM, 1),
     ];
     game.place_house(
@@ -241,6 +318,7 @@ async fn house_demolition_rejects_a_non_owner() {
             y: 5.0,
             z: 5.0,
         },
+        0,
         &auth,
     )
     .await;

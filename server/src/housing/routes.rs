@@ -125,8 +125,10 @@ async fn create_house(
         )
     })?;
     state.game_state.passability_add_house(&house).await;
-    let tree_stats = remove_house_trees(&state.terrain, &house).await?;
-    let grass_stats = remove_house_grass(&state.terrain, &house).await?;
+    let (tree_stats, grass_stats) = tokio::try_join!(
+        remove_house_trees(&state.terrain, &house),
+        remove_house_grass(&state.terrain, &house),
+    )?;
     broadcast_house_change(
         &state.game_state,
         &house,
@@ -164,8 +166,10 @@ async fn update_house(
         )
     })?;
     state.game_state.passability_add_house(&house).await;
-    let tree_stats = remove_house_trees(&state.terrain, &house).await?;
-    let grass_stats = remove_house_grass(&state.terrain, &house).await?;
+    let (tree_stats, grass_stats) = tokio::try_join!(
+        remove_house_trees(&state.terrain, &house),
+        remove_house_grass(&state.terrain, &house),
+    )?;
     broadcast_house_change(
         &state.game_state,
         &house,

@@ -705,9 +705,15 @@ class NetworkManager {
     this.sendMessage({ UseItem: { instance_id: instanceId } })
   }
 
-  sendPlaceHouse(instanceId: number, origin: Position) {
+  sendPlaceHouse(instanceId: number, origin: Position, quarterTurns: number) {
     if (!this.isNetworkableInstanceId(instanceId, 'place house')) return
-    this.sendMessage({ PlaceHouse: { instance_id: instanceId, origin } })
+    this.sendMessage({
+      PlaceHouse: {
+        instance_id: instanceId,
+        origin,
+        quarter_turns: quarterTurns,
+      },
+    })
   }
 
   sendRemoveHouse(houseId: string) {

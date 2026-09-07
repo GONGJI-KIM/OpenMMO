@@ -727,6 +727,7 @@ mod tests {
         HouseData {
             id: "box".to_string(),
             owner_id: "test".to_string(),
+            source_scroll_id: None,
             origin: Position { x, y: 0.0, z },
             rooms: Vec::new(),
             passability: vec![PassabilityGrid {

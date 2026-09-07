@@ -277,6 +277,8 @@ pub struct PassabilityGrid {
 pub struct HouseData {
     pub id: String,
     pub owner_id: String,
+    #[serde(default)]
+    pub source_scroll_id: Option<String>,
     pub origin: Position,
     pub rooms: Vec<RoomData>,
     #[serde(default)]

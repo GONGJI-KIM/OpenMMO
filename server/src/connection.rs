@@ -1666,10 +1666,11 @@ async fn handle_client_message(
         ClientMessage::PlaceHouse {
             instance_id,
             origin,
+            quarter_turns,
         } => {
             if let Some(id) = &state.player_id {
                 game_state
-                    .place_house(id, instance_id, origin, auth_service)
+                    .place_house(id, instance_id, origin, quarter_turns, auth_service)
                     .await;
             }
         }

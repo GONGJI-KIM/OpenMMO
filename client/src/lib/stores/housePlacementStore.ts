@@ -8,6 +8,7 @@ export interface HousePlacementMode {
   house: HouseData
   plots: FencePlot[]
   pending: boolean
+  quarterTurns: number
   error: string | null
   target: { x: number; y: number; z: number } | null
   valid: boolean
@@ -40,11 +41,24 @@ export function openHousePlacement(
     house,
     plots,
     pending: false,
+    quarterTurns: 0,
     error: null,
     target: null,
     valid: false,
     reason: 'Point at your estate to choose a position',
   })
+}
+
+export function rotateHousePlacement() {
+  housePlacementMode.update((mode) =>
+    mode && !mode.pending
+      ? {
+          ...mode,
+          quarterTurns: (mode.quarterTurns + 1) % 4,
+          error: null,
+        }
+      : mode
+  )
 }
 
 export function stopHousePlacement() {

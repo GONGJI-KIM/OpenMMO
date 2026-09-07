@@ -237,7 +237,13 @@ export type ClientMessage =
   | 'PickupStarted'
   | { PickupItem: { instance_id: number } }
   | { UseItem: { instance_id: number } }
-  | { PlaceHouse: { instance_id: number; origin: Position } }
+  | {
+      PlaceHouse: {
+        instance_id: number
+        origin: Position
+        quarter_turns: number
+      }
+    }
   | { RemoveHouse: { house_id: string } }
   | { EditFence: { edge: FenceEdge; place: boolean } }
   | 'StartFenceMode'
