@@ -90,6 +90,87 @@ async fn eating_a_fish_regenerates_hp_from_its_nutrition() {
     let _ = drain(&mut rx);
 }
 
+async fn bag_of(game_state: &GameState, id: &PlayerId) -> Vec<(String, u32)> {
+    let mut bag: Vec<(String, u32)> = game_state
+        .get_player_inventory(id)
+        .await
+        .unwrap()
+        .bag
+        .iter()
+        .map(|i| (i.item_def_id.clone(), i.quantity))
+        .collect();
+    bag.sort();
+    bag
+}
+
+/// Landing a species piles onto its existing entry; a second species opens a
+/// second slot. Species are awarded directly since the bite roll is random.
+#[tokio::test]
+async fn catches_stack_per_species() {
+    let game_state = make_test_game_state("fishing_stack_species");
+    let (id, _rx) = make_angler(&game_state, "angler_sorter").await;
+
+    for _ in 0..3 {
+        game_state.award_item(&id, "raw_trout").await;
+    }
+    game_state.award_item(&id, "raw_minnow").await;
+
+    assert_eq!(
+        bag_of(&game_state, &id).await,
+        vec![("raw_minnow".to_string(), 1), ("raw_trout".to_string(), 3)]
+    );
+}
+
+/// A fresh catch joins the pile the angler already carries instead of taking a
+/// new slot, and the pile keeps its instance id so client slots stay put.
+#[tokio::test]
+async fn a_catch_joins_the_existing_pile() {
+    let game_state = make_test_game_state("fishing_stack_join");
+    let (id, _rx) = make_angler(&game_state, "angler_joiner").await;
+    game_state
+        .inventories
+        .write()
+        .await
+        .get_mut(&id)
+        .unwrap()
+        .bag
+        .push(bag_item(900, "raw_perch", 2));
+
+    game_state.award_item(&id, "raw_perch").await;
+
+    let inv = game_state.get_player_inventory(&id).await.unwrap();
+    let perch: Vec<_> = inv
+        .bag
+        .iter()
+        .filter(|i| i.item_def_id == "raw_perch")
+        .collect();
+    assert_eq!(perch.len(), 1, "one perch entry, not two");
+    assert_eq!(perch[0].quantity, 3);
+    assert_eq!(perch[0].instance_id, 900);
+}
+
+/// Eating from a pile takes one fish and leaves the rest in the same slot.
+#[tokio::test]
+async fn eating_one_fish_from_a_pile_leaves_the_rest() {
+    let game_state = make_test_game_state("fishing_stack_eat");
+    let (id, _rx) = make_angler(&game_state, "angler_snacker").await;
+    game_state
+        .inventories
+        .write()
+        .await
+        .get_mut(&id)
+        .unwrap()
+        .bag
+        .push(bag_item(910, "raw_trout", 3));
+
+    game_state.use_item(&id, 910).await;
+
+    assert_eq!(
+        bag_of(&game_state, &id).await,
+        vec![("raw_trout".to_string(), 2)]
+    );
+}
+
 /// The pure catch-table math: every roll in range maps to a candidate, the
 /// boundaries are exact, and skill shifts weight toward rare fish while
 /// never boosting rarity-0 junk.
