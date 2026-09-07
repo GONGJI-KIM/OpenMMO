@@ -24,6 +24,8 @@ struct MerchantRow {
 pub struct NpcRow {
     #[serde(rename = "npcName")]
     pub npc_name: String,
+    #[serde(rename = "chatAliases", default)]
+    chat_aliases: String,
     /// Role class: picks the prompt template and the auto-created
     /// character's class (e.g. "guard", "merchant").
     #[serde(default)]
@@ -54,6 +56,26 @@ impl NpcRow {
 /// reference the registry instead of spelling every field out.
 pub fn npc_by_id(id: &str) -> Option<&'static NpcRow> {
     npcs().get(id)
+}
+
+pub fn chat_mentions(npc_name: &str, message: &str) -> bool {
+    let message = message.to_lowercase();
+    let matches = |name: &str| {
+        let name = name.to_lowercase();
+        !name.is_empty()
+            && message.match_indices(&name).any(|(start, _)| {
+                let before = message[..start].chars().next_back();
+                let after = message[start + name.len()..].chars().next();
+                let word_char = |c: char| c.is_ascii_alphanumeric() || c == '_';
+                !before.is_some_and(|c| c.is_alphanumeric() || c == '_')
+                    && !after.is_some_and(word_char)
+            })
+    };
+    matches(npc_name)
+        || npcs()
+            .values()
+            .find(|npc| npc.npc_name.eq_ignore_ascii_case(npc_name))
+            .is_some_and(|npc| npc.chat_aliases.split(';').any(matches))
 }
 
 // The embedded game data is immutable at runtime, and the resident section

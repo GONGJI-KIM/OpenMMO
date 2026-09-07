@@ -35,6 +35,9 @@ Thumbs.db
 *.log
 logs/
 
+# Operator deployment notes live in ~/work/notes/
+/doc/DEPLOY_NOTES.md
+
 # Runtime
 *.pid
 *.seed

@@ -24,7 +24,7 @@ mod outcome;
 mod prompt;
 mod walk;
 
-pub(crate) use prompt::format_event;
+pub(crate) use prompt::{format_event, player_within_event_range};
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -34,7 +34,7 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
-use crate::llm_scheduler::{LlmPriority, LlmScheduler};
+use crate::llm_scheduler::{LlmPriority, LlmScheduler, RequestPriority};
 use crate::state::ServeRequest;
 use crate::state::SharedState;
 use onlinerpg_shared::schedule::ScheduleEntry;
@@ -47,7 +47,7 @@ use movement::{
     check_schedule_transition, coverage_positions, fetch_furniture_around, fetch_houses_around,
     resolve_due_schedule,
 };
-use prompt::{build_prompt, record_conversation};
+use prompt::build_prompt;
 
 /// Trait for LLM backends that can send a prompt and return a text response.
 #[async_trait]
@@ -545,35 +545,32 @@ pub async fn llm_driver(
             info!("[{label}] LLM driver: NPC is sleeping, skipping initial prompt");
         } else if always_active || s.has_nearby_human_players() {
             drop(s);
-            // File I/O and tile sampling outside the state lock.
-            let terrain = rendered_terrain_summary(&state).await;
-            let memory = load_memory_tail(&memory_file);
-            let mut s = state.lock().await;
-            let agent_events = s.drain_agent_events();
-            let initial_prompt = build_prompt(
-                &s,
-                &[],
-                &agent_events,
-                &schedule,
-                active_schedule.0,
-                memory.as_deref(),
-                terrain.as_deref(),
+            let priority = RequestPriority::new(LlmPriority::Routine);
+            let tale = {
+                let mut s = state.lock().await;
+                s.queued_llm_priority = Some(priority.clone());
                 tale_for(
                     &tales,
                     &schedule,
                     active_schedule.0,
                     &s,
                     &mut tale_offered_at,
-                ),
-            );
-            drop(s);
-            info!("[{label}] LLM driver: sending initial world state");
+                )
+            };
+            info!("[{label}] LLM driver: queuing initial world state");
             match scheduler
-                .submit(
+                .submit_deferred(
                     &label,
-                    LlmPriority::Routine,
-                    initial_prompt,
-                    Arc::clone(&invoker),
+                    priority,
+                    run_prompt(
+                        Arc::clone(&state),
+                        Arc::clone(&invoker),
+                        schedule.clone(),
+                        active_schedule.0,
+                        memory_file.clone(),
+                        tale,
+                        label.clone(),
+                    ),
                 )
                 .await
             {
@@ -1081,6 +1078,14 @@ pub async fn llm_driver(
         if llm_in_flight.as_ref().is_some_and(|h| h.is_finished()) {
             let handle = llm_in_flight.take().unwrap();
             last_prompt_at = Instant::now();
+            {
+                let mut s = state.lock().await;
+                pending_urgency = s
+                    .pending_event_urgency()
+                    .map(LlmPriority::from)
+                    .unwrap_or(LlmPriority::Idle)
+                    .min(s.take_wake_urgency().into());
+            }
             if let Some(response) = await_llm_response(handle, &label).await {
                 // A live visit walk owns the body; the LLM turn it triggered
                 // may talk but not move.
@@ -1101,6 +1106,9 @@ pub async fn llm_driver(
 
         // === Maybe start a new LLM prompt ===
         if llm_in_flight.is_some() {
+            if let Some(priority) = &state.lock().await.queued_llm_priority {
+                priority.promote(pending_urgency);
+            }
             continue;
         }
 
@@ -1114,7 +1122,8 @@ pub async fn llm_driver(
             min_interval
         };
         let effective_interval = if active { floor } else { idle_interval };
-        if prompt_pending_since.is_none() && last_prompt_at.elapsed() >= effective_interval {
+        let periodic_due = last_prompt_at.elapsed() >= effective_interval;
+        if prompt_pending_since.is_none() && periodic_due {
             prompt_pending_since = Some(Instant::now());
             if pending_urgency == LlmPriority::Idle && active {
                 pending_urgency = LlmPriority::Routine;
@@ -1136,90 +1145,98 @@ pub async fn llm_driver(
         prompt_pending_since = None;
         let forced = std::mem::take(&mut force_prompt);
 
-        // Drain first; the prompt build (and its memory-file read) only
-        // happens when something actually needs answering.
-        let (events, agent_events, priority) = {
+        let (priority, tale) = {
             let mut s = state.lock().await;
-
-            // Skip the LLM while asleep, and — for an operator-run NPC — while
-            // nobody is around to see it. Events still drain so they can't pile
-            // up unbounded; what was said still lands in the conversation
-            // history, so a waking NPC knows what it heard. A forced visit
-            // prompt is exempt from the audience check: its human (a sleeper
-            // woken upstairs) may not be on our floor yet.
             if is_sleeping || !(always_active || forced || s.has_nearby_human_players()) {
                 discard_turn(&mut s);
                 pending_urgency = LlmPriority::Idle;
                 continue;
             }
-
-            let events = s.drain_events();
-            let agent_events = s.drain_agent_events();
-
-            // Determine priority from the most urgent event (lower = more urgent)
-            let max_urgency = events
-                .iter()
-                .map(|e| LlmPriority::from(s.classify_event(e)))
-                .fold(pending_urgency, std::cmp::min);
-            (events, agent_events, max_urgency)
-        };
-        pending_urgency = LlmPriority::Idle; // reset for next cycle
-
-        if events.is_empty() && agent_events.is_empty() {
-            continue;
-        }
-
-        // File I/O and tile sampling outside the state lock.
-        let memory = load_memory_tail(&memory_file);
-        let terrain = rendered_terrain_summary(&state).await;
-        let prompt = {
-            let mut s = state.lock().await;
-            // Armed one turn early so the closing turn reads it under EVENTS.
-            if s.meeting_turn() {
-                let closing = prompt::meeting_closing_event(
-                    s.meeting_host,
-                    s.pricing.as_ref().map_or(0, |p| p.last_change_pct),
-                );
-                s.push_ambient_event(closing);
+            let event_urgency = s.pending_event_urgency();
+            if event_urgency.is_none() && !periodic_due {
+                pending_urgency = LlmPriority::Idle;
+                continue;
             }
-            // History is recorded after the build: this prompt shows the
-            // batch under EVENTS, the next one under RECENT CONVERSATION.
-            let prompt = build_prompt(
-                &s,
-                &events,
-                &agent_events,
-                &schedule,
-                active_schedule.0,
-                memory.as_deref(),
-                terrain.as_deref(),
-                tale_for(
-                    &tales,
-                    &schedule,
-                    active_schedule.0,
-                    &s,
-                    &mut tale_offered_at,
+            let priority = RequestPriority::new(
+                pending_urgency.min(
+                    event_urgency
+                        .map(LlmPriority::from)
+                        .unwrap_or(LlmPriority::Idle),
                 ),
             );
-            record_conversation(&mut s, &events);
-            prompt
+            s.queued_llm_priority = Some(priority.clone());
+            let tale = tale_for(
+                &tales,
+                &schedule,
+                active_schedule.0,
+                &s,
+                &mut tale_offered_at,
+            );
+            (priority, tale)
         };
+        pending_urgency = LlmPriority::Idle;
 
-        // Submit to scheduler as background task (doesn't block combat ticks)
-        info!(
-            "[{label}] LLM driver: submitting {:?} prompt ({} chars)",
-            priority,
-            prompt.len()
-        );
         let sched = scheduler.clone();
-        let inv = Arc::clone(&invoker);
+        let run = run_prompt(
+            Arc::clone(&state),
+            Arc::clone(&invoker),
+            schedule.clone(),
+            active_schedule.0,
+            memory_file.clone(),
+            tale,
+            label.clone(),
+        );
         let lbl = label.clone();
         llm_in_flight = Some(tokio::spawn(async move {
-            sched.submit(&lbl, priority, prompt, inv).await
+            sched.submit_deferred(&lbl, priority, run).await
         }));
         if let Some((_, prompted)) = &mut wrapup {
             *prompted = true;
         }
     }
+}
+
+async fn run_prompt(
+    state: Arc<Mutex<SharedState>>,
+    invoker: Arc<dyn LlmBackend>,
+    schedule: Vec<ScheduleEntry>,
+    active_schedule: Option<usize>,
+    memory_file: Option<String>,
+    tale: Option<String>,
+    label: String,
+) -> anyhow::Result<String> {
+    let terrain = rendered_terrain_summary(&state).await;
+    let memory = load_memory_tail(&memory_file);
+    let prompt = {
+        let mut s = state.lock().await;
+        s.queued_llm_priority = None;
+        s.take_wake_urgency();
+        let events = s.drain_events();
+        let mut agent_events = s.drain_agent_events();
+        if s.meeting_turn() {
+            agent_events.push(prompt::meeting_closing_event(
+                s.meeting_host,
+                s.pricing.as_ref().map_or(0, |p| p.last_change_pct),
+            ));
+        }
+        let prompt = build_prompt(
+            &s,
+            &events,
+            &agent_events,
+            &schedule,
+            active_schedule,
+            memory.as_deref(),
+            terrain.as_deref(),
+            tale,
+        );
+        s.finish_conversation();
+        prompt
+    };
+    info!(
+        "[{label}] LLM driver: sending current prompt ({} bytes)",
+        prompt.len()
+    );
+    invoker.send_message(&prompt).await
 }
 
 /// Keep tonight's set in step with the schedule: draw it when a `tales`
@@ -1371,8 +1388,8 @@ async fn decline_lapsed_trade(state: &Arc<Mutex<SharedState>>, label: &str) {
 /// Drop a turn without prompting: events drain (so they cannot pile up)
 /// but what was said still lands in the conversation history.
 fn discard_turn(s: &mut SharedState) {
-    let events = s.drain_events();
-    record_conversation(s, &events);
+    s.drain_events();
+    s.finish_conversation();
     s.drain_agent_events();
 }
 
@@ -1478,6 +1495,81 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn a_queued_prompt_uses_new_chat_and_marks_only_the_response_trigger() {
+        use onlinerpg_shared::{PlayerId, ServerMessage};
+
+        let (mut s, _rx) = test_state();
+        let mut me = test_player(0.0, 0.0);
+        me.name = "Miriel".into();
+        s.self_player_id = Some(me.id);
+        s.self_player = Some(me);
+        let mut guest = test_player(2.0, 0.0);
+        guest.id = PlayerId::from(2);
+        guest.name = "Guest".into();
+        s.nearby_players.insert(guest.id, guest);
+        let chat = |message: &str| ServerMessage::ChatMessage {
+            player_id: PlayerId::from(2),
+            message: message.into(),
+        };
+        s.push_event(chat("Where can I buy food?"));
+        let priority = RequestPriority::new(LlmPriority::Routine);
+        s.queued_llm_priority = Some(priority.clone());
+        let state = Arc::new(Mutex::new(s));
+        let prompts = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let backend: Arc<dyn LlmBackend> = Arc::new(Capture(Arc::clone(&prompts)));
+        let scheduler = LlmScheduler::new(1, Duration::from_secs(120));
+        let call = scheduler.submit_deferred(
+            "Miriel",
+            priority,
+            run_prompt(
+                Arc::clone(&state),
+                Arc::clone(&backend),
+                Vec::new(),
+                None,
+                None,
+                None,
+                "Miriel".into(),
+            ),
+        );
+        tokio::pin!(call);
+        assert!(futures_util::poll!(&mut call).is_pending());
+        assert!(prompts.lock().unwrap().is_empty());
+        {
+            let mut s = state.lock().await;
+            s.push_event(chat("미리엘, 빵 두 개 주세요"));
+            s.push_event(chat("Actually, three please"));
+        }
+        call.await.unwrap();
+        let first = prompts.lock().unwrap()[0].clone();
+        assert!(first.contains("Where can I buy food?"));
+        assert!(first.contains("Actually, three please"));
+        assert!(first.contains("[Urgent] [Chat] Guest: 미리엘, 빵 두 개 주세요"));
+        assert!(!first.contains("[Urgent] [Chat] Guest: Where"));
+        assert!(state.lock().await.pending_chat().is_empty());
+        assert_eq!(
+            state.lock().await.take_wake_urgency(),
+            crate::state::EventUrgency::Noise
+        );
+        state.lock().await.push_event(chat("Miriel, thank you"));
+        run_prompt(
+            Arc::clone(&state),
+            backend,
+            Vec::new(),
+            None,
+            None,
+            None,
+            "Miriel".into(),
+        )
+        .await
+        .unwrap();
+        let second = prompts.lock().unwrap()[1].clone();
+        let events = second.split("=== EVENTS ===").nth(1).unwrap();
+        assert!(second.contains("Where can I buy food?"));
+        assert!(!events.contains("빵 두 개"));
+        assert!(events.contains("Miriel, thank you"));
+    }
+
     /// Wait until `marker` shows up in a captured prompt — or in the event
     /// queue, covering the race where this loop drains the event before the
     /// driver does.
@@ -1530,6 +1622,78 @@ mod tests {
         assert!(std::fs::read_to_string(&memory)
             .unwrap()
             .contains("I was killed"));
+    }
+
+    #[tokio::test]
+    async fn idle_poll_calls_the_llm_without_new_events() {
+        check_idle_driver(false).await;
+    }
+
+    #[tokio::test]
+    async fn ordinary_chat_wakes_an_idle_driver_without_a_name_mention() {
+        check_idle_driver(true).await;
+    }
+
+    async fn check_idle_driver(send_chat: bool) {
+        let (mut s, _rx) = test_state();
+        let me = test_player(0.0, 0.0);
+        s.in_game = true;
+        s.self_player_id = Some(me.id);
+        s.self_player = Some(me);
+        let state = Arc::new(Mutex::new(s));
+        let prompts: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+        let config = DriverConfig {
+            label: "idle_test".into(),
+            memory_file: None,
+            favor_file: None,
+            min_interval: Duration::from_secs(1),
+            urgent_min_interval: Duration::from_secs(1),
+            debounce: Duration::ZERO,
+            idle_interval: Duration::from_secs(if send_chat { 3600 } else { 1 }),
+            activity_window: Duration::from_secs(if send_chat { 30 } else { 0 }),
+            always_active: true,
+            schedule: Vec::new(),
+            sickroom: Vec::new(),
+            serve_tables: false,
+            maid_names: HashSet::new(),
+            tables: Vec::new(),
+            claims: Arc::default(),
+            api_base_url: "http://127.0.0.1:9".into(),
+        };
+        let driver = tokio::spawn(llm_driver(
+            Arc::clone(&state),
+            Arc::new(Capture(Arc::clone(&prompts))),
+            LlmScheduler::new(1, Duration::from_secs(5)),
+            config,
+        ));
+        let result = tokio::time::timeout(Duration::from_secs(5), async {
+            if send_chat {
+                while prompts.lock().unwrap().is_empty() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                let mut s = state.lock().await;
+                let mut guest = test_player(2.0, 0.0);
+                guest.id = onlinerpg_shared::PlayerId::from(2);
+                guest.name = "Guest".into();
+                s.nearby_players.insert(guest.id, guest);
+                s.push_event(onlinerpg_shared::ServerMessage::ChatMessage {
+                    player_id: onlinerpg_shared::PlayerId::from(2),
+                    message: "Can I buy some bread?".into(),
+                });
+            }
+            while prompts.lock().unwrap().len() < 2 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        driver.abort();
+        result.expect("the idle driver must make a second call");
+        if send_chat {
+            let captured = prompts.lock().unwrap();
+            assert!(captured[1].contains("[Chat] Guest: Can I buy some bread?"));
+            assert!(!captured[1].contains("[Urgent] [Chat] Guest:"));
+        }
+        assert!(state.lock().await.pending_event_urgency().is_none());
     }
 
     #[tokio::test]

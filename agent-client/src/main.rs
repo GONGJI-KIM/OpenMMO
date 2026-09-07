@@ -73,7 +73,7 @@ struct Config {
     #[serde(default)]
     npcs: Vec<NpcConfig>,
 
-    /// Maximum number of concurrent LLM calls across all NPCs (min 1, default 2)
+    /// Maximum concurrent LLM calls across all NPCs (min 1, default 4).
     #[serde(default = "default_max_concurrent")]
     max_concurrent: usize,
 
@@ -169,7 +169,7 @@ pub fn default_activity_window_secs() -> u64 {
 }
 
 fn default_max_concurrent() -> usize {
-    2
+    4
 }
 
 fn default_request_timeout_secs() -> u64 {
@@ -597,10 +597,10 @@ mode = "google"
 "#;
 
     #[test]
-    fn max_concurrent_defaults_to_two() {
+    fn max_concurrent_defaults_to_four() {
         assert_eq!(
             parse("server = \"ws://127.0.0.1:10006\"\n").max_concurrent,
-            2
+            4
         );
     }
 

@@ -429,3 +429,108 @@ fn an_npc_taking_a_seat_counts_as_a_guest() {
     });
     assert!(s.drain_recent_seatings().is_empty());
 }
+
+fn chat_state() -> SharedState {
+    let (mut s, _rx) = test_state();
+    let mut me = test_player(0.0, 0.0);
+    me.name = "Miriel".into();
+    s.self_player_id = Some(me.id);
+    s.self_player = Some(me);
+    let mut player = test_player(2.0, 0.0);
+    player.id = PlayerId::from(2);
+    player.name = "Guest".into();
+    s.nearby_players.insert(player.id, player);
+    s
+}
+
+fn chat(message: &str) -> ServerMessage {
+    ServerMessage::ChatMessage {
+        player_id: PlayerId::from(2),
+        message: message.into(),
+    }
+}
+
+#[test]
+fn ambient_chat_is_kept_and_wakes_a_routine_turn() {
+    let mut s = chat_state();
+    assert_eq!(
+        s.push_event(chat("Where can I buy a bow?")),
+        EventUrgency::Routine
+    );
+    assert_eq!(s.take_wake_urgency(), EventUrgency::Routine);
+    assert_eq!(s.pending_event_urgency(), Some(EventUrgency::Routine));
+    assert_eq!(s.drain_events().len(), 1);
+    assert!(s.pending_chat()[0].contains("Guest: Where can I buy a bow?"));
+    s.nearby_players.clear();
+    s.finish_conversation();
+    assert!(s.chat_history()[0].contains("Guest:"));
+    assert!(s.pending_chat().is_empty());
+}
+
+#[test]
+fn addressed_chat_wakes_with_english_or_korean_names() {
+    for text in ["MIRIEL, hello", "미리엘님 두 개 주세요", "@Miriel hello"] {
+        let mut s = chat_state();
+        assert_eq!(s.push_event(chat(text)), EventUrgency::Urgent, "{text}");
+        assert_eq!(s.take_wake_urgency(), EventUrgency::Urgent);
+        assert_eq!(s.pending_event_urgency(), Some(EventUrgency::Urgent));
+    }
+    for text in ["Mirielle said hello", "notMiriel", "other_Miriel"] {
+        let mut s = chat_state();
+        assert_eq!(s.push_event(chat(text)), EventUrgency::Routine, "{text}");
+    }
+}
+
+#[test]
+fn distant_or_self_chat_does_not_wake_the_npc() {
+    let mut s = chat_state();
+    s.nearby_players
+        .get_mut(&PlayerId::from(2))
+        .unwrap()
+        .position
+        .x = NPC_SIGHT_RADIUS + 1.0;
+    assert_eq!(s.push_event(chat("Miriel!")), EventUrgency::Noise);
+    assert!(s.pending_chat().is_empty());
+    assert_eq!(
+        s.push_event(ServerMessage::ChatMessage {
+            player_id: s.self_player_id.unwrap(),
+            message: "I am Miriel".into(),
+        }),
+        EventUrgency::Noise
+    );
+    assert_eq!(s.pending_event_urgency(), None);
+}
+
+#[test]
+fn npc_conversation_only_wakes_during_a_meeting() {
+    let mut s = chat_state();
+    s.nearby_players
+        .get_mut(&PlayerId::from(2))
+        .unwrap()
+        .is_official_npc = true;
+    assert_eq!(s.push_event(chat("Miriel, hello")), EventUrgency::Noise);
+    s.enter_meeting(false);
+    assert_eq!(
+        s.push_event(chat("What about prices?")),
+        EventUrgency::Urgent
+    );
+}
+
+#[test]
+fn whispers_stay_urgent_and_background_chat_wakes_as_routine() {
+    use crate::llm_scheduler::{LlmPriority, RequestPriority};
+    let mut s = chat_state();
+    s.queued_llm_priority = Some(RequestPriority::new(LlmPriority::Routine));
+    s.push_event(chat("hello everyone"));
+    assert_eq!(s.take_wake_urgency(), EventUrgency::Routine);
+    s.push_event(ServerMessage::WhisperMessage {
+        from: "Guest".into(),
+        to: "Miriel".into(),
+        message: "Two please".into(),
+    });
+    assert_eq!(s.take_wake_urgency(), EventUrgency::Urgent);
+    assert!(s
+        .pending_chat()
+        .iter()
+        .any(|line| line.contains("Two please")));
+}

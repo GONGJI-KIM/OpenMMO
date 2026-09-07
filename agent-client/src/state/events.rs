@@ -8,7 +8,7 @@ pub enum EventUrgency {
     Urgent,
     /// Can wait and be batched with next prompt (world state changes, xp, spawns)
     Routine,
-    /// Don't send to LLM at all (high-frequency movement, time sync)
+    /// Does not trigger a turn (background conversation or state-only updates).
     Noise,
 }
 
@@ -46,11 +46,7 @@ impl SharedState {
                     EventUrgency::Routine
                 }
             }
-            // Urgent: a human chats (not ourselves). NPC→NPC chat is only
-            // Routine: urgent wakeups on both sides turn any shared topic
-            // into an endless conversation loop (and an LLM-cost leak), so
-            // NPC replies wait for the next batched prompt instead.
-            ServerMessage::ChatMessage { player_id, .. } => {
+            ServerMessage::ChatMessage { player_id, message } => {
                 if self_id == Some(player_id) {
                     EventUrgency::Noise
                 } else if self
@@ -58,14 +54,21 @@ impl SharedState {
                     .get(player_id)
                     .is_some_and(|p| p.is_official_npc)
                 {
-                    // The meeting banter is the scene; MEETING_TURNS bounds it.
                     if self.in_meeting_scene() {
+                        EventUrgency::Urgent
+                    } else {
+                        EventUrgency::Noise
+                    }
+                } else if crate::driver::player_within_event_range(self, player_id) {
+                    if self.self_player.as_ref().is_some_and(|p| {
+                        crate::shop_info::chat_mentions(&p.name, message)
+                    }) {
                         EventUrgency::Urgent
                     } else {
                         EventUrgency::Routine
                     }
                 } else {
-                    EventUrgency::Urgent
+                    EventUrgency::Noise
                 }
             }
             // Urgent: a whisper is always addressed to us; the echo of our
@@ -1037,6 +1040,10 @@ impl SharedState {
         }
 
         let urgency = self.classify_event(&msg);
+        self.remember_conversation(&msg);
+        if matches!(msg, ServerMessage::ChatMessage { .. }) && urgency == EventUrgency::Noise {
+            return urgency;
+        }
 
         // Deduplicate high-frequency movement events: keep only latest per entity
         match &msg {
@@ -1122,17 +1129,18 @@ impl SharedState {
             _ => {}
         }
 
+        if urgency == EventUrgency::Urgent
+            || (urgency == EventUrgency::Routine
+                && matches!(msg, ServerMessage::ChatMessage { .. }))
+        {
+            self.wake(urgency);
+        }
         self.events.push(msg);
 
         // Cap buffer size: drop oldest events
         if self.events.len() > MAX_EVENTS {
             let overflow = self.events.len() - MAX_EVENTS;
             self.events.drain(..overflow);
-        }
-
-        // Notify Claude driver if urgent
-        if urgency == EventUrgency::Urgent {
-            self.wake(EventUrgency::Urgent);
         }
 
         urgency
@@ -1149,6 +1157,14 @@ impl SharedState {
         events.extend(self.latest_player_moves.drain().map(|(_, v)| v));
 
         events
+    }
+
+    pub fn pending_event_urgency(&self) -> Option<EventUrgency> {
+        self.events
+            .iter()
+            .map(|event| self.classify_event(event))
+            .chain((!self.agent_events.is_empty()).then_some(EventUrgency::Routine))
+            .min()
     }
 
     /// Drain synthetic agent-side events (e.g. player proximity alerts).
@@ -1208,6 +1224,9 @@ impl SharedState {
     /// prompt's scheduler priority.
     pub(super) fn wake(&mut self, urgency: EventUrgency) {
         self.wake_urgency = self.wake_urgency.min(urgency);
+        if let Some(priority) = &self.queued_llm_priority {
+            priority.promote(urgency.into());
+        }
         self.urgent_notify.notify_one();
     }
 

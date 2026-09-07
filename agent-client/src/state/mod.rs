@@ -61,9 +61,7 @@ use tokio::sync::{mpsc, Notify};
 pub(crate) use onlinerpg_shared::messages::MUSIC_EMOTE;
 
 const MAX_EVENTS: usize = 200;
-/// Rolling window of conversation lines kept as prompt context. Stateless
-/// backends (one ephemeral Codex thread per prompt) see only this window, so
-/// it is the NPC's entire short-term memory of who said what.
+/// Separate caps for previous context and newly heard conversation.
 const MAX_CHAT_HISTORY: usize = 30;
 /// How many of our own recent song titles the world state lists, so a bard
 /// can favor tunes it has not played lately.
@@ -307,9 +305,10 @@ pub struct SharedState {
     /// its hands, since an offer only reaches items in the bag.
     pub keepsake_ids: Vec<String>,
     events: Vec<ServerMessage>,
-    /// Conversation lines already shown to (or heard while asleep by) the
-    /// LLM, kept as the RECENT CONVERSATION prompt section (`MAX_CHAT_HISTORY`).
+    /// Previously consumed conversation context.
     chat_history: VecDeque<String>,
+    pending_chat: VecDeque<String>,
+    pub queued_llm_priority: Option<crate::llm_scheduler::RequestPriority>,
     /// Titles of our own recent performances, oldest first (`MAX_RECENT_SONGS`).
     recent_songs: VecDeque<String>,
     /// Accumulated per-player favor, keyed by canonical display name. Fed by
@@ -471,6 +470,8 @@ impl SharedState {
             keepsake_ids: Vec::new(),
             events: Vec::new(),
             chat_history: VecDeque::new(),
+            pending_chat: VecDeque::new(),
+            queued_llm_priority: None,
             recent_songs: VecDeque::new(),
             favor: BTreeMap::new(),
             latest_monster_moves: HashMap::new(),
