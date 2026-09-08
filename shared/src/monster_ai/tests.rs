@@ -2300,6 +2300,55 @@ fn chase_lookahead_stops_where_the_attack_engages() {
     assert!((short.z - 12.0).abs() < 1e-3, "{short:?}");
 }
 
+#[test]
+fn engagement_clamp_does_not_skip_a_path_bend() {
+    let mut brain = make_brain();
+    brain.state = AiState::Chase;
+    brain.move_speed = brain.run_speed;
+    brain.target_position = Some(Position {
+        x: 20.0,
+        y: 0.0,
+        z: 20.0,
+    });
+    brain.install_path(vec![
+        PathWaypoint {
+            x: 20.0,
+            z: 10.0,
+            floor: 0,
+        },
+        PathWaypoint {
+            x: 20.0,
+            z: 20.0,
+            floor: 0,
+        },
+    ]);
+    let target = Position {
+        x: 20.0,
+        y: 0.0,
+        z: 11.0,
+    };
+
+    brain.follow_path_engaging(2_000.0, target, Some(2.0));
+
+    assert!(
+        brain.position.x < 20.0,
+        "the engage circle clamps before the bend"
+    );
+    assert_eq!(
+        brain.current_waypoint_idx, 0,
+        "a clamp before the bend must keep following the current leg"
+    );
+    assert!(
+        !brain.pending_bend_sync,
+        "the bend has not been reached yet"
+    );
+
+    brain.follow_path_engaging(1_000.0, target, Some(2.0));
+    assert_eq!(brain.current_waypoint_idx, 1);
+    assert!((brain.position.x - 20.0).abs() < 1e-4);
+    assert!((brain.position.z - 10.0).abs() < 1e-4);
+}
+
 /// Remote-client replica of the chase: walk toward each sync's target at the
 /// state's speed and check the attack transition lands where the client is.
 #[test]
