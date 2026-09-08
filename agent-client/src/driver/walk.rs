@@ -487,11 +487,14 @@ async fn step_along(
                 MAX_STEP_DIST,
             )
         };
+        let turn_ms = s.mount_turn_delay_ms(to_wp.rotation());
         return match s
             .send_step(x, z, wp.floor, to_wp.rotation(), background, sprint)
             .await
         {
-            Ok(sprinting) => Step::Sent(travel_ms(dist, sprinting, s.movement_speed_mult())),
+            Ok(sprinting) => {
+                Step::Sent(turn_ms + travel_ms(dist, sprinting, s.movement_speed_mult()))
+            }
             Err(e) => {
                 error!("Failed to send a walk step: {e}");
                 Step::Error
@@ -521,6 +524,7 @@ async fn nudge(
     let dist = (to_goal.dist - stop_dist).min(MAX_STEP_DIST);
     let ratio = dist / to_goal.dist;
     let floor = s.passability_floor();
+    let turn_ms = s.mount_turn_delay_ms(to_goal.rotation());
     match s
         .send_step(
             me.x + to_goal.dx * ratio,
@@ -534,7 +538,7 @@ async fn nudge(
     {
         Ok(sprinting) => {
             debug!("A* had no leg to walk — nudging {dist:.1}m on");
-            Step::Sent(travel_ms(dist, sprinting, s.movement_speed_mult()))
+            Step::Sent(turn_ms + travel_ms(dist, sprinting, s.movement_speed_mult()))
         }
         Err(e) => {
             error!("Failed to send a nudge step: {e}");

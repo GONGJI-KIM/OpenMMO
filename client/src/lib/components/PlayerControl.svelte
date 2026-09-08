@@ -292,7 +292,9 @@
       cachedMoveMult = mult
       cachedMoveConfig = scaleMovementConfig(DEFAULT_MOVEMENT_CONFIG, mult)
     }
-    return cachedMoveConfig
+    return currentPlayer?.mounted
+      ? { ...cachedMoveConfig, mountRotation: playerRotation }
+      : cachedMoveConfig
   }
 
   // Character rotation and current speed
@@ -589,7 +591,11 @@
     )
   }
 
-  const keyboardMoveSender = createKeyboardMoveSender(sendPlayerMove)
+  const keyboardMoveSender = createKeyboardMoveSender(
+    sendPlayerMove,
+    (rotation, stop) =>
+      networkManager.sendPlayerMountTurn(rotation, stop, isSprintingNow())
+  )
   const keyboardTapTracker = createKeyboardTapTracker()
   const keyboardSpeedRamp = createKeyboardSpeedRamp()
 
@@ -1131,7 +1137,7 @@
         )
       },
       applyStartedMovement: (started) => {
-        playerRotation = started.playerRotation
+        if (!currentPlayer?.mounted) playerRotation = started.playerRotation
         // The moving state OWNS the path data. Transition before emit: the
         // projection derives 'moving' from the machine's owned state.
         playerControlMachine.transition({

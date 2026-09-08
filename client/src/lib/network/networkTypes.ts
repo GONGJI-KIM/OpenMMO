@@ -124,6 +124,9 @@ export type RollCharacterStatsResult =
 // Serde externally tagged enum shapes
 export type ClientMessage =
   | {
+      PlayerMountTurn: { rotation: number; stop?: boolean; sprinting?: boolean }
+    }
+  | {
       ClientInfo: {
         protocol_version: number
         client_kind: string

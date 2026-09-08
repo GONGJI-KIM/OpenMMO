@@ -1,3 +1,4 @@
+import { steerHorse } from '../utils/horseMovement'
 import { SvelteMap } from 'svelte/reactivity'
 import { get } from 'svelte/store'
 import { hmrSingleton } from '../utils/hmr'
@@ -175,6 +176,14 @@ class PlayerStateManager {
         dt
       )
 
+      if (mounted) {
+        result.rotation = steerHorse(
+          currentPlayer.rotation,
+          this.targetRotations.get(playerId) ?? result.rotation,
+          dt
+        ).rotation
+      }
+
       // calculateMovementStep only advances XZ and carries Y over, and the
       // move protocol has no per-waypoint Y, so the ground has to be
       // resampled here. Without it a remote keeps the Y it entered the floor
@@ -203,8 +212,9 @@ class PlayerStateManager {
           position: result.newPos,
           state: currentState,
           speed: 0,
-          rotation:
-            targetRotation ?? currentPlayer?.rotation ?? result.rotation,
+          rotation: mounted
+            ? result.rotation
+            : (targetRotation ?? currentPlayer?.rotation ?? result.rotation),
           movementMode: undefined,
         })
 

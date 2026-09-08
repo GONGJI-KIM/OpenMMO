@@ -23,6 +23,7 @@ pub mod meal;
 pub mod messages;
 pub mod monster_ai;
 pub mod moon;
+pub mod mount_movement;
 pub mod pathfinding;
 pub mod pricing;
 pub mod schedule;
@@ -141,7 +142,9 @@ pub const NPC_TOKEN_FILENAME: &str = "npc_token";
 /// v61: persistent estate storage chests with atomic, weight-limited transfers.
 /// v62: estate editor tabs can request an authenticated landscaping mode.
 /// v63: horse mounting state and mount changes.
-pub const PROTOCOL_VERSION: u32 = 63;
+/// v64: mounted steering and PlayerMountTurn cancels travel at the server position.
+/// v65: mounted arc movement and explicit mount steering cancellation.
+pub const PROTOCOL_VERSION: u32 = 65;
 
 /// Fingerprint of the dungeon layout generator this build compiled, stamped by
 /// `build.rs`. Layouts never travel the wire — both sides generate them from

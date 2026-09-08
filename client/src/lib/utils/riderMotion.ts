@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { findBoneByName } from './characterAnimationUtils'
+import { angleDelta } from './horseMovement'
 
 type Limb = {
   base: THREE.Bone
@@ -30,6 +31,7 @@ export class RiderMotion {
   private readonly to = new THREE.Vector3()
   private readonly rotation = new THREE.Quaternion()
   private readonly parentRotation = new THREE.Quaternion()
+  private readonly up = new THREE.Vector3(0, 1, 0)
 
   constructor(private readonly root: THREE.Object3D) {
     const limb = (names: string[]): Limb | undefined => {
@@ -71,14 +73,17 @@ export class RiderMotion {
     this.applied = false
   }
 
-  apply(hipLift: number, handLift = 0, idleWeight = 0) {
+  apply(hipLift: number, handLift = 0, idleWeight = 0, facingYaw?: number) {
     this.restore()
     const { torso } = this
     const hips = torso?.base
     if (
       !hips?.parent ||
       !torso ||
-      (hipLift <= 0 && handLift === 0 && idleWeight === 0)
+      (hipLift <= 0 &&
+        handLift === 0 &&
+        idleWeight === 0 &&
+        facingYaw === undefined)
     )
       return
     for (const saved of this.saved) {
@@ -124,6 +129,23 @@ export class RiderMotion {
     this.orient(torso.end, torso.rotation)
     for (const leg of this.legs) this.solve(leg)
     for (const arm of this.arms) this.solve(arm)
+    if (facingYaw !== undefined) {
+      let turnYaw = facingYaw
+      if (this.arms.length === 2) {
+        this.arms[0].base.getWorldPosition(this.from)
+        this.arms[1].base.getWorldPosition(this.to)
+        this.direction.subVectors(this.from, this.to)
+        turnYaw = angleDelta(
+          Math.atan2(-this.direction.z, this.direction.x),
+          Math.atan2(this.forward.x, this.forward.z) + facingYaw
+        )
+      }
+      torso.joint.getWorldQuaternion(this.rotation)
+      this.rotation.premultiply(
+        this.parentRotation.setFromAxisAngle(this.up, turnYaw)
+      )
+      this.orient(torso.joint, this.rotation)
+    }
   }
 
   private capture(limb: Limb) {

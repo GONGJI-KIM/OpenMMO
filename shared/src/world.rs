@@ -18,6 +18,9 @@ pub const WORLD_MAX_X: f32 = WORLD_MIN_X + WORLD_WIDTH_X;
 /// Normalize a world X coordinate into the terrain's canonical baked range.
 #[inline]
 pub fn wrap_world_x(x: f32) -> f32 {
+    if (WORLD_MIN_X..WORLD_MAX_X).contains(&x) {
+        return x;
+    }
     (x - WORLD_MIN_X).rem_euclid(WORLD_WIDTH_X) + WORLD_MIN_X
 }
 

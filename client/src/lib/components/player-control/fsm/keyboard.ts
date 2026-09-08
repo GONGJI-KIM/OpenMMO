@@ -1,3 +1,8 @@
+import {
+  moveHorse,
+  resolveHorseSteps,
+  angleDelta,
+} from '../../../utils/horseMovement'
 import type { MovementConfig, Position } from '../../../utils/movementUtils'
 import { shortestWrappedDeltaX } from '../../../terrain/world-wrap'
 import type { InteractionExitKind } from './interaction'
@@ -14,25 +19,39 @@ const KEYBOARD_SEND_INTERVAL = 0.5
 export interface KeyboardMoveSender {
   /** Per-frame position after a successful step. Sends a replace on the first
    *  step of a session, then appends a path sample every send interval. */
-  step(position: Position, rotation: number): void
+  step(position: Position, rotation: number, turning?: boolean): void
   /** Send the resting position once when the session ends (keys released or
    *  step blocked) so the server converges on the exact stop point. */
-  flush(position: Position): void
+  flush(position: Position, rotation?: number): void
   /** Drop the session without sending (another mover owns the queue). */
   reset(): void
 }
 
 export function createKeyboardMoveSender(
-  send: SendPlayerMove
+  send: SendPlayerMove,
+  turn?: (rotation: number, stop?: boolean) => void
 ): KeyboardMoveSender {
   let lastSent: Position | null = null
   let lastRotation = 0
+  let wasTurning = false
   return {
-    step(position, rotation) {
+    step(position, rotation, turning = false) {
+      const changedDirection =
+        Math.abs(angleDelta(lastRotation, rotation)) > 0.01
       lastRotation = rotation
-      if (lastSent === null) {
+      if (turning) {
+        if (!wasTurning || changedDirection) {
+          if (turn) turn(rotation)
+          else send(position, rotation)
+        }
+        lastSent = { ...position }
+        wasTurning = true
+        return
+      }
+      if (wasTurning || lastSent === null) {
         send(position, rotation)
         lastSent = { ...position }
+        wasTurning = false
         return
       }
       const dx = shortestWrappedDeltaX(lastSent.x, position.x)
@@ -45,14 +64,25 @@ export function createKeyboardMoveSender(
         lastSent = { ...position }
       }
     },
-    flush(position) {
+    flush(position, rotation) {
+      if (wasTurning && rotation !== undefined && turn) {
+        turn(rotation, true)
+        lastSent = null
+        wasTurning = false
+        return
+      }
       if (lastSent === null) return
-      if (position.x !== lastSent.x || position.z !== lastSent.z) {
+      if (rotation !== undefined) {
+        if (turn && position.x === lastSent.x && position.z === lastSent.z)
+          turn(rotation)
+        else send(position, rotation)
+      } else if (position.x !== lastSent.x || position.z !== lastSent.z) {
         send(position, lastRotation, undefined, true)
       }
       lastSent = null
     },
     reset() {
+      wasTurning = false
       lastSent = null
     },
   }
@@ -159,7 +189,11 @@ interface KeyboardMovementInput {
     dirZ: number
   ) => boolean
   writePlayerPosition: (position: Position, rotation: number) => void
-  sendPlayerMove: (position: Position, rotation: number) => void
+  sendPlayerMove: (
+    position: Position,
+    rotation: number,
+    turning?: boolean
+  ) => void
 }
 
 export type KeyboardMovementOutcome =
@@ -185,6 +219,35 @@ export function applyKeyboardMovement({
 }: KeyboardMovementInput): KeyboardMovementOutcome {
   // Clamp tab-switch delta spikes so one frame can't teleport the player.
   const dt = Math.min(deltaTimeSeconds, 0.1)
+  const desiredRotation = Math.atan2(direction.x, direction.z)
+  if (config.mountRotation !== undefined) {
+    const result = moveHorse(
+      currentPos,
+      config.mountRotation,
+      config.maxSpeed,
+      dt,
+      desiredRotation
+    )
+    const path = resolveHorseSteps(
+      result.mountSteps ?? [],
+      currentPos,
+      config.mountRotation,
+      { sampleHeight, isMovementBlocked, isUphillTooSteep }
+    )
+    writePlayerPosition(path.position, path.rotation)
+    if (path.blocked) return { kind: path.blocked }
+    sendPlayerMove(
+      path.position,
+      desiredRotation,
+      Math.abs(angleDelta(path.rotation, desiredRotation)) > 0.01
+    )
+    return {
+      kind: 'moved',
+      currentSpeed: result.newSpeed,
+      playerRotation: path.rotation,
+    }
+  }
+
   const currentSpeed = speedRamp.advance(config, dt)
   const speed = currentSpeed * dt
   const newX = currentPos.x + direction.x * speed
@@ -207,7 +270,7 @@ export function applyKeyboardMovement({
   }
 
   const groundY = sampleHeight(newX, newZ)
-  const playerRotation = Math.atan2(direction.x, direction.z)
+  const playerRotation = desiredRotation
   const position = { x: newX, y: groundY, z: newZ }
 
   writePlayerPosition(position, playerRotation)
@@ -331,7 +394,8 @@ export function runKeyboardFrame({
   actions,
 }: RunKeyboardFrameInput) {
   if (!currentPlayer || !hasKeysPressed) {
-    const tapTarget = tapTracker.release(currentPlayer?.position ?? null)
+    const releasedTarget = tapTracker.release(currentPlayer?.position ?? null)
+    const tapTarget = config.mountRotation === undefined ? releasedTarget : null
     speedRamp.reset()
     // Session over: a click-path or combat chase owns the movement queue now
     // (their replace supersedes us), so hand off without sending.
@@ -345,7 +409,7 @@ export function runKeyboardFrame({
       moveSender.reset()
       actions.requestMove(tapTarget)
     } else {
-      moveSender.flush(currentPlayer.position)
+      moveSender.flush(currentPlayer.position, config.mountRotation)
       // Long-hold release has no glide arrival to settle the machine, so it
       // must leave keyboard_moving itself or the run animation loops forever.
       if (isKeyboardMoving) {
@@ -402,7 +466,7 @@ export function runKeyboardFrame({
       // doesn't keep walking to a stale sample. Reset the ramp too, or holding
       // into an obstacle charges it to full and the next clear step launches.
       speedRamp.reset()
-      moveSender.flush(currentPlayer.position)
+      moveSender.flush(currentPlayer.position, config.mountRotation)
       return
     }
   } else {

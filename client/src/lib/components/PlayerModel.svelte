@@ -1230,7 +1230,8 @@
       riderMotion?.apply(
         horseMount.riderHipLift,
         horseMount.riderHandLift,
-        horseMount.riderIdleWeight
+        horseMount.riderIdleWeight,
+        horseMount.riderFacingYaw
       )
       horseReins?.update()
     }
@@ -1296,7 +1297,11 @@
     }
 
     if (horseMount && riderGroup && modelGroup) {
-      horseMount.update(deltaTime, playerState === 'moving' ? _speed : 0)
+      horseMount.update(
+        deltaTime,
+        playerState === 'moving' ? _speed : 0,
+        rotation
+      )
       horseMount.seat.getWorldPosition(seatPosition)
       riderGroup.position.copy(modelGroup.worldToLocal(seatPosition))
       riderGroup.position.y += horseMount.riderBaseOffsetY

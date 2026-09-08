@@ -363,6 +363,14 @@ pub enum ClientMessage {
     /// The scene has finished compiling, so the player can be hit again. See
     /// `entity::WORLD_LOADING_GRACE_MS`.
     WorldReady,
+    /// Start an arc turn from the authoritative position or cancel it.
+    PlayerMountTurn {
+        rotation: f32,
+        #[serde(default)]
+        stop: bool,
+        #[serde(default)]
+        sprinting: bool,
+    },
     PlayerMove {
         position: Position,
         rotation: f32,

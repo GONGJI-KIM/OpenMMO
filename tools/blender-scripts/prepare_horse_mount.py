@@ -49,6 +49,52 @@ def linear(action):
                         point.interpolation = 'LINEAR'
 
 
+def horse_turns(arm):
+    scene = bpy.context.scene
+    select([arm])
+    bpy.ops.object.mode_set(mode='EDIT')
+    for bone in arm.data.edit_bones:
+        bone.use_connect = False
+    bpy.ops.object.mode_set(mode='OBJECT')
+    rest = {b.name: b.matrix_local.copy() for b in arm.data.bones}
+    mirror = Matrix.Diagonal((-1, 1, 1, 1))
+    mirrored = {}
+    for name, matrix in rest.items():
+        opposite = name.replace('Left', 'Right') if name.startswith('Left') else name.replace('Right', 'Left')
+        alignment = rest[opposite].inverted() @ mirror @ matrix
+        alignment.translation = Vector((0, 0, 0))
+        mirrored[name] = opposite, alignment
+    for degrees in [90, 180]:
+        name = f'turn_right_{degrees}'
+        source = bpy.data.actions[name]
+        arm.animation_data.action = source
+        poses = []
+        for frame in range(int(source.frame_range[1]) + 1):
+            scene.frame_set(frame)
+            hips = arm.pose.bones['Hips'].matrix
+            forward = hips.to_quaternion() @ Vector((1, 0, 0))
+            yaw = math.atan2(forward.x, -forward.y)
+            correction = (Matrix.Rotation(-yaw, 4, 'Z')
+                          @ Matrix.Translation((-hips.translation.x, -hips.translation.y, 0)))
+            poses.append({b.name: correction @ b.matrix for b in arm.pose.bones})
+        arm.animation_data.action = None
+        bpy.data.actions.remove(source)
+        for side in ['right', 'left']:
+            action = bpy.data.actions.new(f'turn_{side}_{degrees}')
+            arm.animation_data.action = action
+            for frame, pose in enumerate(poses):
+                scene.frame_set(frame)
+                for bone in arm.pose.bones:
+                    if side == 'left':
+                        opposite, alignment = mirrored[bone.name]
+                        bone.matrix = mirror @ pose[opposite] @ alignment
+                    else:
+                        bone.matrix = pose[bone.name]
+                    bpy.context.view_layer.update()
+                keys(arm, frame)
+            linear(action)
+
+
 def horse():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     SOURCE.mkdir(parents=True, exist_ok=True)
@@ -108,6 +154,7 @@ def horse():
                 bpy.context.view_layer.update()
             keys(arm, frame - start)
         linear(action)
+    horse_turns(arm)
     arm.animation_data.action = bpy.data.actions['idle']
     scene.frame_set(0)
     for mat in mesh.data.materials:
@@ -203,4 +250,5 @@ def rider():
 
 if '--rider-only' not in sys.argv:
     horse()
-rider()
+if '--horse-only' not in sys.argv:
+    rider()

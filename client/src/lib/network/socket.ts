@@ -475,6 +475,10 @@ class NetworkManager {
     }
   }
 
+  sendPlayerMountTurn(rotation: number, stop = false, sprinting = false) {
+    this.sendMessage({ PlayerMountTurn: { rotation, stop, sprinting } })
+  }
+
   sendPlayerMove(
     position: { x: number; y: number; z: number },
     rotation: number,

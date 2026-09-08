@@ -136,5 +136,5 @@
       `assets/horse_reins/horse_reins.blend`. Cycles 투명 직교 렌더 512²→128² RGBA 아이콘
       `client/public/items/objects/horse_reins.png`. Blender 재임포트·아이콘 육안·로컬 URL 바이트 일치 확인.
     - 재현: `blender -b --python-exit-code 1 -P tools/blender-scripts/build_horse_reins.py`.
-      무게 0.5, 중첩 불가, 기본가 50000(5골드), Rica 판매. 사용 시 소모 없이 탑승·하차한다.
+      무게 0.5, 중첩 불가, 기본가 15000(1골드 50실버), Rica 판매. 사용 시 소모 없이 탑승·하차한다.
       말 모델은 [MAXDESIGN-3D의 Horse, CC BY 4.0](animals.md), 규칙은 [MOUNTS.md](../MOUNTS.md).

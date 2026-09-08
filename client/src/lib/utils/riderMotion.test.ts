@@ -60,6 +60,90 @@ function rider() {
 const world = (bone: THREE.Bone) => bone.getWorldPosition(new THREE.Vector3())
 
 describe('rider motion', () => {
+  it.each([-0.6, 0, 0.6])(
+    'aligns an already twisted torso to heading %s',
+    (yaw) => {
+      const { root, bones, arms, legs, motion } = rider()
+      bones[1].rotation.y = 0.25
+      root.updateMatrixWorld(true)
+      const feet = [world(legs[2]), world(legs[5])]
+      const hands = [world(arms[2]), world(arms[5])]
+      motion.apply(0, 0, 0, yaw)
+      const shoulders = world(arms[0]).sub(world(arms[3]))
+      expect(Math.atan2(-shoulders.z, shoulders.x)).toBeCloseTo(
+        root.rotation.y + yaw,
+        5
+      )
+      for (const i of [0, 1]) {
+        expect(world(arms[i * 3 + 2]).y).toBeCloseTo(hands[i].y, 5)
+        expect(world(legs[i * 3 + 2]).distanceTo(feet[i])).toBeLessThan(1e-5)
+      }
+    }
+  )
+
+  it.each([-Math.PI / 9, Math.PI / 9])(
+    'turns the torso and hands together by %s without lifting hands or moving legs',
+    (yaw) => {
+      const { bones, arms, legs, motion } = rider()
+      for (const [hipLift, handLift, idleWeight] of [
+        [0, 0, 0],
+        [0, -0.2, 1],
+        [0.09, 0.015, 0],
+      ]) {
+        motion.apply(hipLift, handLift, idleWeight)
+        const pivot = world(bones[1])
+        const upper = [...bones.slice(1), ...arms]
+        const lower = [bones[0], ...legs]
+        const positions = upper.map(world)
+        const lowerPositions = lower.map(world)
+        const rotations = upper.map((bone) =>
+          bone.getWorldQuaternion(new THREE.Quaternion())
+        )
+        const twist = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(0, 1, 0),
+          yaw
+        )
+        motion.apply(hipLift, handLift, idleWeight, yaw)
+        upper.forEach((bone, i) => {
+          const expected = positions[i]
+            .clone()
+            .sub(pivot)
+            .applyQuaternion(twist)
+            .add(pivot)
+          expect(world(bone).distanceTo(expected)).toBeLessThan(1e-5)
+          expect(world(bone).y).toBeCloseTo(positions[i].y, 5)
+          expect(
+            bone
+              .getWorldQuaternion(new THREE.Quaternion())
+              .angleTo(rotations[i].premultiply(twist))
+          ).toBeLessThan(1e-5)
+        })
+        lower.forEach((bone, i) =>
+          expect(world(bone).distanceTo(lowerPositions[i])).toBeLessThan(1e-5)
+        )
+      }
+    }
+  )
+
+  it('restores the waist and hands after repeated turns and direction changes', () => {
+    const { bones, arms, legs, motion } = rider()
+    const all = [...bones, ...arms, ...legs]
+    const positions = all.map(world)
+    const rotations = all.map((bone) => bone.quaternion.clone())
+    motion.apply(0, -0.2, 1, 0.3)
+    const turned = all.map(world)
+    for (let i = 0; i < 120; i++) motion.apply(0, -0.2, 1, 0.3)
+    all.forEach((bone, i) =>
+      expect(world(bone).distanceTo(turned[i])).toBeLessThan(1e-5)
+    )
+    motion.apply(0, -0.2, 1, -0.3)
+    motion.restore()
+    all.forEach((bone, i) => {
+      expect(world(bone).distanceTo(positions[i])).toBeLessThan(1e-5)
+      expect(bone.quaternion.angleTo(rotations[i])).toBeLessThan(1e-5)
+    })
+  })
+
   it('tucks both elbows toward the body while idle without stretching the arms', () => {
     const { root, arms, motion } = rider()
     const before = arms.map((bone) => world(bone))

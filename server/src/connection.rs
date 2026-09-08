@@ -1340,6 +1340,20 @@ async fn handle_client_message(
             return Ok(responses);
         }
 
+        ClientMessage::PlayerMountTurn {
+            rotation,
+            stop,
+            sprinting,
+        } => {
+            if let Some(id) = &state.player_id {
+                if stop {
+                    game_state.stop_horse(id).await;
+                } else {
+                    game_state.turn_horse(id, rotation, sprinting).await;
+                }
+            }
+        }
+
         ClientMessage::PlayerMove {
             position,
             rotation,
