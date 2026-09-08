@@ -246,7 +246,11 @@
     // Add or rebuild changed houses
     for (const data of allHouses) {
       const existing = houses.get(data.id)
-      const newHash = JSON.stringify({ roofs, rooms: data.rooms })
+      const newHash = JSON.stringify({
+        roofs,
+        origin: data.origin,
+        rooms: data.rooms,
+      })
 
       // Fast path: if only door isOpen changed, sync door states without rebuild
       if (existing && existing.roomsHash === newHash) continue

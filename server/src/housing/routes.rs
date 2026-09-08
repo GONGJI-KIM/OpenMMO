@@ -108,14 +108,19 @@ async fn create_house(
     State(state): State<HousingRouteState>,
     Json(mut house): Json<HouseData>,
 ) -> Result<(StatusCode, Json<HouseData>), (StatusCode, String)> {
-    // Shape/bounds validation must precede the neighbor chunk scan (F-010)
     validate_house(&house).map_err(|msg| (StatusCode::BAD_REQUEST, msg))?;
 
-    let neighbors = load_neighbors(&state.housing, &house).await?;
     let (cx, cz) = world_to_chunk(house.origin.x, house.origin.z);
-    house.id = next_house_id(cx, cz, &neighbors);
+    let all_houses = state.housing.read_all_houses().await.map_err(|e| {
+        error!("Failed to read houses for ID allocation: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error".to_string(),
+        )
+    })?;
+    house.id = next_house_id(cx, cz, &all_houses);
 
-    validate_house_neighbors(&house, &neighbors).map_err(|msg| (StatusCode::BAD_REQUEST, msg))?;
+    validate_house_neighbors(&house, &all_houses).map_err(|msg| (StatusCode::BAD_REQUEST, msg))?;
 
     state.housing.write_house(&house).await.map_err(|e| {
         error!("Failed to write house {}: {}", house.id, e);
@@ -153,19 +158,36 @@ async fn update_house(
     }
     house.id = house_id;
 
+    let previous = state
+        .housing
+        .find_house(&house.id)
+        .await
+        .map_err(|e| {
+            error!("Failed to find house {} for update: {}", house.id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error".to_string(),
+            )
+        })?
+        .ok_or((StatusCode::NOT_FOUND, "house not found".to_string()))?;
+
     validate_house(&house).map_err(|msg| (StatusCode::BAD_REQUEST, msg))?;
 
     let neighbors = load_neighbors(&state.housing, &house).await?;
 
     validate_house_neighbors(&house, &neighbors).map_err(|msg| (StatusCode::BAD_REQUEST, msg))?;
 
-    state.housing.write_house(&house).await.map_err(|e| {
-        error!("Failed to write house {}: {}", house.id, e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Internal server error".to_string(),
-        )
-    })?;
+    state
+        .housing
+        .replace_house(&previous, &house)
+        .await
+        .map_err(|e| {
+            error!("Failed to write house {}: {}", house.id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error".to_string(),
+            )
+        })?;
     state.game_state.passability_add_house(&house).await;
     let (tree_stats, grass_stats) = tokio::try_join!(
         remove_house_trees(&state.terrain, &house),

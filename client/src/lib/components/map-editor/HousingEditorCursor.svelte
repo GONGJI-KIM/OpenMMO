@@ -20,6 +20,7 @@
     setDeleteSelectedRoom,
     setFlattenSelectedRoomTerrain,
     setReinstallSelectedHouse,
+    setMoveSelectedHouse,
     populateEditStoresFromRoom,
     wallVariants,
     type RoomTemplate,
@@ -34,6 +35,7 @@
     WallVariant,
   } from '../../types/housing'
   import { housingManager } from '../../managers/housingManager'
+  import { objectManager } from '../../managers/objectManager'
   import {
     buildHouseGroup,
     disposeHouseGroup,
@@ -138,8 +140,12 @@
   }
 
   function isInAnyRect(rects: Rect[], wx: number, wz: number): boolean {
-    return rects.some(
-      (r) => wx >= r.minX && wx <= r.maxX && wz >= r.minZ && wz <= r.maxZ
+    return rects.some((rect) => isInRect(rect, wx, wz))
+  }
+
+  function isInRect(rect: Rect, wx: number, wz: number): boolean {
+    return (
+      wx >= rect.minX && wx <= rect.maxX && wz >= rect.minZ && wz <= rect.maxZ
     )
   }
 
@@ -252,6 +258,7 @@
   setDeleteSelectedRoom(() => deleteSelectedRoom())
   setFlattenSelectedRoomTerrain(() => flattenSelectedRoomTerrain())
   setReinstallSelectedHouse(() => reinstallSelectedHouse())
+  setMoveSelectedHouse((deltaX, deltaZ) => moveSelectedHouseBy(deltaX, deltaZ))
 
   function updateRaycaster(event: MouseEvent) {
     if (!camera) return false
@@ -543,105 +550,12 @@
       await housingManager.updateHouse(updatedHouse)
     }
 
-    // Restore terrain and grass for 1F non-stairwell rooms
     if (
       deletedRoom.floorLevel === 0 &&
       deletedRoom.roomType !== 'stairwell' &&
       heightManager
     ) {
-      const roomWorldX = house.origin.x + deletedRoom.localX
-      const roomWorldZ = house.origin.z + deletedRoom.localZ
-      const roomMaxX = roomWorldX + deletedRoom.sizeX
-      const roomMaxZ = roomWorldZ + deletedRoom.sizeZ
-
-      // 1. Restore heightmap from original (footprint + blend radius)
-      const restoreMinX = roomWorldX - BLEND_RADIUS
-      const restoreMinZ = roomWorldZ - BLEND_RADIUS
-      const restoreMaxX = roomMaxX + BLEND_RADIUS
-      const restoreMaxZ = roomMaxZ + BLEND_RADIUS
-      heightManager.restoreFromOriginal(
-        restoreMinX,
-        restoreMinZ,
-        restoreMaxX,
-        restoreMaxZ
-      )
-
-      // 2. Re-flatten for all remaining nearby 1F rooms
-      for (const h of housingManager.getAllHouses()) {
-        for (const room of h.rooms) {
-          if (room.floorLevel !== 0 || room.roomType === 'stairwell') continue
-          const rx = h.origin.x + room.localX
-          const rz = h.origin.z + room.localZ
-          const rmx = rx + room.sizeX
-          const rmz = rz + room.sizeZ
-          // Check if this room's flatten zone overlaps the restored area
-          if (
-            rx - BLEND_RADIUS > restoreMaxX ||
-            rmx + BLEND_RADIUS < restoreMinX ||
-            rz - BLEND_RADIUS > restoreMaxZ ||
-            rmz + BLEND_RADIUS < restoreMinZ
-          )
-            continue
-          const protectedRects = buildGroundFloorRects(
-            (ph, pr) => pr === room && ph.id === h.id
-          )
-          heightManager.flattenArea(
-            rx,
-            rz,
-            rmx,
-            rmz,
-            h.origin.y,
-            BLEND_RADIUS,
-            (wx, wz) => isInAnyRect(protectedRects, wx, wz)
-          )
-        }
-      }
-      heightManager.saveAllDirty()
-
-      // 3. Restore grass from original, then re-remove for remaining houses
-      if (grassDataManager) {
-        const grassMinX = roomWorldX - GRASS_MARGIN
-        const grassMinZ = roomWorldZ - GRASS_MARGIN
-        const grassMaxX = roomMaxX + GRASS_MARGIN
-        const grassMaxZ = roomMaxZ + GRASS_MARGIN
-
-        const { tileMinX, tileMaxX, tileMinZ, tileMaxZ } =
-          worldRectToTileBounds(grassMinX, grassMinZ, grassMaxX, grassMaxZ)
-
-        // Restore original grass for affected tiles
-        const restorePromises: Promise<boolean>[] = []
-        for (let tz = tileMinZ; tz <= tileMaxZ; tz++) {
-          for (let tx = tileMinX; tx <= tileMaxX; tx++) {
-            restorePromises.push(grassDataManager.restoreFromOriginal(tx, tz))
-          }
-        }
-        await Promise.all(restorePromises)
-
-        // Re-remove grass under all remaining 1F rooms on the restored tiles —
-        // restoreFromOriginal brings back whole 64m tiles, so every house on
-        // them must be re-carved, not just rooms near the deleted one.
-        const recarveRects: Rect[] = []
-        for (const h of housingManager.getAllHouses()) {
-          for (const room of groundFloorRooms(h)) {
-            const rect = roomGrassRect(h, room)
-            const rb = worldRectToTileBounds(
-              rect.minX,
-              rect.minZ,
-              rect.maxX,
-              rect.maxZ
-            )
-            if (
-              rb.tileMinX > tileMaxX ||
-              rb.tileMaxX < tileMinX ||
-              rb.tileMinZ > tileMaxZ ||
-              rb.tileMaxZ < tileMinZ
-            )
-              continue
-            recarveRects.push(rect)
-          }
-        }
-        await grassDataManager.removeGrassInRects(recarveRects)
-      }
+      await restoreGroundAfterRemoval([roomRect(house, deletedRoom)])
     }
   }
 
@@ -681,14 +595,134 @@
   }
 
   function roomGrassRect(house: HouseData, room: RoomData): Rect {
-    const minX = house.origin.x + room.localX - GRASS_MARGIN
-    const minZ = house.origin.z + room.localZ - GRASS_MARGIN
+    return roomRect(house, room, GRASS_MARGIN)
+  }
+
+  function roomRect(house: HouseData, room: RoomData, margin = 0): Rect {
+    const minX = house.origin.x + room.localX - margin
+    const minZ = house.origin.z + room.localZ - margin
     return {
       minX,
       minZ,
-      maxX: minX + room.sizeX + GRASS_MARGIN * 2,
-      maxZ: minZ + room.sizeZ + GRASS_MARGIN * 2,
+      maxX: minX + room.sizeX + margin * 2,
+      maxZ: minZ + room.sizeZ + margin * 2,
     }
+  }
+
+  async function restoreGroundAfterRemoval(
+    removedRooms: Rect[],
+    includeHouseId?: string
+  ) {
+    const heights = heightManager
+    if (!heights || removedRooms.length === 0) return
+
+    const restoreBounds: Rect = {
+      minX: Infinity,
+      minZ: Infinity,
+      maxX: -Infinity,
+      maxZ: -Infinity,
+    }
+    for (const room of removedRooms) {
+      const restore = {
+        minX: room.minX - BLEND_RADIUS,
+        minZ: room.minZ - BLEND_RADIUS,
+        maxX: room.maxX + BLEND_RADIUS,
+        maxZ: room.maxZ + BLEND_RADIUS,
+      }
+      restoreBounds.minX = Math.min(restoreBounds.minX, restore.minX)
+      restoreBounds.minZ = Math.min(restoreBounds.minZ, restore.minZ)
+      restoreBounds.maxX = Math.max(restoreBounds.maxX, restore.maxX)
+      restoreBounds.maxZ = Math.max(restoreBounds.maxZ, restore.maxZ)
+      heights.restoreFromOriginal(
+        restore.minX,
+        restore.minZ,
+        restore.maxX,
+        restore.maxZ
+      )
+    }
+
+    const currentRooms: { house: HouseData; rect: Rect }[] = []
+    for (const house of housingManager.getAllHouses()) {
+      for (const room of groundFloorRooms(house)) {
+        currentRooms.push({ house, rect: roomRect(house, room) })
+      }
+    }
+
+    for (const current of currentRooms) {
+      const nearRestore =
+        current.rect.minX - BLEND_RADIUS <= restoreBounds.maxX &&
+        current.rect.maxX + BLEND_RADIUS >= restoreBounds.minX &&
+        current.rect.minZ - BLEND_RADIUS <= restoreBounds.maxZ &&
+        current.rect.maxZ + BLEND_RADIUS >= restoreBounds.minZ
+      if (current.house.id !== includeHouseId && !nearRestore) continue
+
+      heights.flattenArea(
+        current.rect.minX,
+        current.rect.minZ,
+        current.rect.maxX,
+        current.rect.maxZ,
+        current.house.origin.y,
+        BLEND_RADIUS,
+        (wx, wz) =>
+          currentRooms.some(
+            (other) => other !== current && isInRect(other.rect, wx, wz)
+          )
+      )
+    }
+    await heights.saveAllDirty()
+
+    const grass = grassDataManager
+    if (!grass) return
+
+    const affectedTiles: { x: number; z: number }[] = []
+    for (const room of removedRooms) {
+      const grassRect = {
+        minX: room.minX - GRASS_MARGIN,
+        minZ: room.minZ - GRASS_MARGIN,
+        maxX: room.maxX + GRASS_MARGIN,
+        maxZ: room.maxZ + GRASS_MARGIN,
+      }
+      const bounds = worldRectToTileBounds(
+        grassRect.minX,
+        grassRect.minZ,
+        grassRect.maxX,
+        grassRect.maxZ
+      )
+      for (let z = bounds.tileMinZ; z <= bounds.tileMaxZ; z++) {
+        for (let x = bounds.tileMinX; x <= bounds.tileMaxX; x++) {
+          if (!affectedTiles.some((tile) => tile.x === x && tile.z === z)) {
+            affectedTiles.push({ x, z })
+          }
+        }
+      }
+    }
+    await Promise.all(
+      affectedTiles.map(({ x, z }) => grass.restoreFromOriginal(x, z))
+    )
+
+    const recarveRects = currentRooms
+      .map(({ rect }) => ({
+        minX: rect.minX - GRASS_MARGIN,
+        minZ: rect.minZ - GRASS_MARGIN,
+        maxX: rect.maxX + GRASS_MARGIN,
+        maxZ: rect.maxZ + GRASS_MARGIN,
+      }))
+      .filter((rect) => {
+        const bounds = worldRectToTileBounds(
+          rect.minX,
+          rect.minZ,
+          rect.maxX,
+          rect.maxZ
+        )
+        return affectedTiles.some(
+          ({ x, z }) =>
+            x >= bounds.tileMinX &&
+            x <= bounds.tileMaxX &&
+            z >= bounds.tileMinZ &&
+            z <= bounds.tileMaxZ
+        )
+      })
+    await grass.removeGrassInRects(recarveRects)
   }
 
   async function reinstallSelectedHouse() {
@@ -727,6 +761,49 @@
     if (!saved) {
       console.warn(`Failed to reinstall house ${house.id}`)
     }
+  }
+
+  async function moveSelectedHouseBy(
+    deltaX: number,
+    deltaZ: number
+  ): Promise<boolean> {
+    const houseId = get(selectedHouseId)
+    if (houseId == null || !heightManager) return false
+
+    const house = housingManager.getHouseById(houseId)
+    if (!house) return false
+
+    const previous = structuredClone(house)
+    const moved = structuredClone(house)
+    moved.origin.x += deltaX
+    moved.origin.z += deltaZ
+
+    const saved = await housingManager.updateHouse(moved)
+    if (!saved) return false
+
+    const movedObjects = await objectManager
+      .moveHouseContents(previous, deltaX, deltaZ)
+      .catch((error) => {
+        console.error('Failed to load house contents:', error)
+        return false
+      })
+    if (!movedObjects) {
+      const rolledBack = await housingManager.updateHouse(previous)
+      if (!rolledBack) {
+        console.error(`Failed to roll back house ${house.id} after object move`)
+      }
+      scheduleUpdateHighlight()
+      return false
+    }
+
+    const oldRooms = groundFloorRooms(previous)
+    await restoreGroundAfterRemoval(
+      oldRooms.map((room) => roomRect(previous, room)),
+      houseId
+    )
+
+    scheduleUpdateHighlight()
+    return true
   }
 
   function applyRoomSelection(
@@ -1045,6 +1122,7 @@
     setDeleteSelectedRoom(null)
     setFlattenSelectedRoomTerrain(null)
     setReinstallSelectedHouse(null)
+    setMoveSelectedHouse(null)
     placementPreview.set(null)
     previewMatValid.dispose()
     previewMatInvalid.dispose()

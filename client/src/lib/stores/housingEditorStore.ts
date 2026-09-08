@@ -181,6 +181,15 @@ export function setReinstallSelectedHouse(
   reinstallSelectedHouse = fn
 }
 
+export let moveSelectedHouse:
+  | ((deltaX: number, deltaZ: number) => Promise<boolean>)
+  | null = null
+export function setMoveSelectedHouse(
+  fn: ((deltaX: number, deltaZ: number) => Promise<boolean>) | null
+) {
+  moveSelectedHouse = fn
+}
+
 // Selection state for edit mode
 export const selectedHouseId = writable<string | null>(null)
 export const selectedRoomIndex = writable<number | null>(null)

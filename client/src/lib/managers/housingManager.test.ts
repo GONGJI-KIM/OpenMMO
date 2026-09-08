@@ -121,6 +121,21 @@ describe('housingManager.evictDistantChunks', () => {
 
     expect(removed).toEqual(['once'])
   })
+
+  it('moves an updated house between cached chunks', () => {
+    load('moved', 0, 0)
+    load('moved', 1, 0)
+
+    evictAt(3, 0)
+
+    expect(ids()).toEqual(['moved'])
+    expect(housingManager.getHouseById('moved')?.origin).toEqual({
+      x: TERRAIN_TILE_SIZE + TERRAIN_TILE_SIZE / 2,
+      y: 0,
+      z: TERRAIN_TILE_SIZE / 2,
+    })
+    expect(removed).toEqual([])
+  })
 })
 
 describe('housingManager.updateStreaming', () => {
