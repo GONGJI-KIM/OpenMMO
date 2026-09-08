@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Heroic-tale candidates (doc/HEROIC_TALES.md) from openmmo-server journal
-lines on stdin. Prints ledger-shaped lines for a human to pick from and
+lines on stdin. Prints natural-language ledger lines for a human to review and
 append to agent-client/data/tales/ledger.txt — never appends itself.
 
 Usage: journalctl -u openmmo-server --since "<KST>" -o cat | python3 tales.py [DATE]
@@ -25,12 +25,35 @@ TITLE = re.compile(r"Player (\S+) earned title '([^']+)'")
 TITLE_OFFLINE = re.compile(r"Character (\d+) earned title '([^']+)'")
 
 BOSSES = {"goblin_boss", "orc_boss", "ogre_boss"}
-LABELS_PATH = os.path.expanduser("~/work/OnlineRPG/data/map_labels.json")
-try:
-    with open(LABELS_PATH) as f:
-        LABELS = {k: (v["x"], v["z"]) for k, v in json.load(f).items() if v["kind"] != "continent"}
-except OSError:
-    LABELS = {}
+DATA_DIR = os.path.expanduser("~/work/OnlineRPG/data")
+
+
+def load_data(filename):
+    try:
+        with open(os.path.join(DATA_DIR, filename)) as f:
+            return json.load(f)
+    except OSError:
+        return {}
+
+
+def names(data):
+    return {key: value["name"] for key, value in data.items() if "name" in value}
+
+
+def display(registry, value):
+    return registry.get(value, value.replace("_", " "))
+
+
+MONSTER_NAMES = names(load_data("monsters.json"))
+ITEM_NAMES = names(load_data("items.json"))
+TITLE_NAMES = names(load_data("titles.json"))
+LABEL_DATA = load_data("map_labels.json")
+LABEL_NAMES = names(LABEL_DATA)
+LABELS = {
+    key: (value["x"], value["z"])
+    for key, value in LABEL_DATA.items()
+    if value["kind"] != "continent"
+}
 ALDERMARK = LABELS.get("aldermark", (-1475.2, 4741.6))
 
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
@@ -48,10 +71,12 @@ titles = []
 offline_titles = []
 farthest = {}
 
+
 def note_pos(name, x, z):
     d = math.hypot(x - ALDERMARK[0], z - ALDERMARK[1])
     if d > farthest.get(name, (0, 0, 0))[0]:
         farthest[name] = (d, x, z)
+
 
 for raw in sys.stdin:
     line = ANSI.sub("", raw).rstrip()
@@ -87,36 +112,65 @@ for raw in sys.stdin:
     if m:
         offline_titles.append((m[1], m[2]))
 
-def out(kind, name, *rest):
-    print(f"{date}  {kind:<14} {name:<12} " + "  ".join(str(r) for r in rest))
 
+def out(name, brief):
+    print(f"# REVIEW {date} | {name} | {brief}")
 
-def slug(place):
-    """Ledger args are single tokens; the log's 'Ogre Den depth 3' becomes ogre_den."""
-    return re.sub(r"\s+depth \d+$", "", place).strip().lower().replace(" ", "_")
 
 print("# candidates — check solo/first against the ledger and DB before appending")
 for name, boss, place in boss_kills:
-    out("boss_kill", name, boss, slug(place), "solo=?", "first=?")
+    out(
+        name,
+        f"{name} defeated the {display(MONSTER_NAMES, boss)} in {place}. Before appending, state "
+        "whether it was solo or the server first only if verified, and add the "
+        "intended celebratory performance direction.",
+    )
 for name, boss, place in boss_deaths:
-    out("boss_death", name, boss, slug(place))
+    out(
+        name,
+        f"{name} fell to the {display(MONSTER_NAMES, boss)} in {place}. Sing the loss as a tragedy, "
+        f"never ridicule {name}.",
+    )
 for name, title in titles:
-    out("title", name, title)
+    out(name, f'{name} earned the title "{display(TITLE_NAMES, title)}". Celebrate the achievement.')
 for cid, title in offline_titles:
-    out("title", f"character#{cid}", title, "(offline grant: resolve the name in DB)")
+    out(
+        f"character#{cid}",
+        f'Character #{cid} earned the title "{display(TITLE_NAMES, title)}". Resolve the current '
+        "character name in the DB before appending, then celebrate the achievement.",
+    )
 if enchants:
     plus, name, item = max(enchants)
-    out("enchant_up", name, item, f"+{plus}", "record=?  (window high; compare with DB max)")
+    out(
+        name,
+        f"{name} enchanted a {display(ITEM_NAMES, item)} to +{plus}, the audit window's highest. "
+        "Compare with the DB before calling it a realm record, then state the "
+        "intended celebratory performance direction.",
+    )
 for plus, name, item in sorted(breaks, reverse=True):
     if plus >= min_break:
-        out("enchant_break", name, item, f"+{plus}")
+        out(
+            name,
+            f"{name}'s {display(ITEM_NAMES, item)} shattered while enchanting past +{plus}. "
+            f"Sing it as a tragedy and do not ridicule {name}.",
+        )
 if levels:
     name = max(levels, key=lambda n: len(levels[n]))
     top = max(levels[name])
-    out("most_levels", name, f"+{len(levels[name])}", f"reached={top}")
-    print("# level_record: compare", name, "at", top, "with the DB max level")
+    gained = len(levels[name])
+    out(
+        name,
+        f"{name} climbed {gained} levels during the audit window, more than anyone "
+        f"observed, and reached level {top}. Celebrate the climb.",
+    )
+    print("# highest level: compare", name, "at", top, "with the DB maximum")
 if farthest:
     name, (d, x, z) = max(farthest.items(), key=lambda kv: kv[1][0])
     near = min(LABELS, key=lambda k: math.hypot(x - LABELS[k][0], z - LABELS[k][1]), default="?")
-    out("farthest", name, f"near={near}", f"dist={int(d)}", f"# at ({x:.0f},{z:.0f})")
-print("# most_xp: diff this audit's (name, level, xp) snapshot against the previous one")
+    out(
+        name,
+        f"{name} travelled farther from Aldermark than anyone observed, reaching "
+        f"coordinates ({x:.0f}, {z:.0f}) near {display(LABEL_NAMES, near)}, about {int(d)} metres "
+        "away. Celebrate the journey without inventing places or encounters.",
+    )
+print("# daily experience leader: diff this audit's (name, level, xp) snapshot against the previous one")

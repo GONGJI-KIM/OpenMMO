@@ -111,12 +111,12 @@ DB(`character_items(item_def_id, enchant, equip_slot, quantity)` + `characters`)
 scp .claude/skills/prod-log-audit/tales.py prod:/tmp/ && \
 ssh prod 'journalctl -u openmmo-server --since "<KST>" -o cat | python3 /tmp/tales.py YYYY-MM-DD'
 ```
-- 후보를 읽고 노래감인 것만 사용자에게 보인 뒤 prod의 `~/work/OnlineRPG/agent-client/data/tales/ledger.txt`에 **append**한다(리포 밖, gitignore). 형식은 `DATE KIND NAME args key=value`. 스크립트는 절대 직접 쓰지 않는다.
-- `solo=`/`first=`는 원장에 같은 보스가 이미 있는지, `record=`는 DB 최고 인챈트, `level_record`는 DB 최고 레벨과 대조해 채운다.
-- `most_xp`: DB `SELECT character_name, level, xp FROM characters WHERE level >= 5`를 `~/work/notes/openmmo-YYYY-MM-DD-xp.tsv`로 남기고 직전 tsv와 xp 차이 1위를 적는다. 같은 사람이 이어지면 새 줄 대신 `streak=N` 줄 하나.
-- 같은 사람의 같은 종류 사건은 첫 번과 스트릭만. 개명(`renamed to`)·삭제(`Character id=N deleted`)가 보이면 원장의 그 이름을 고치거나 줄을 지운다 — 원장을 고쳐 쓰는 유일한 경우.
+- 후보를 읽고 노래감인 것만 사용자에게 보인 뒤 prod의 `~/work/OnlineRPG/agent-client/data/tales/ledger.txt`에 **append**한다(리포 밖, gitignore). 형식은 `DATE | HERO | 확인된 사실과 공연 방향을 적은 자연어 문장`. 스크립트는 모든 후보 앞에 `# REVIEW`를 붙여 원장에 복사돼도 바드가 무시하게 한다. 사실 확인과 사용자 승인 뒤 문장을 다듬고 이 접두사를 제거한 줄만 append하며, 스크립트는 절대 직접 쓰지 않는다.
+- 단독 처치·서버 최초 처치는 기존 원장과 로그, 최고 인챈트·레벨 기록은 DB와 대조한 뒤 확인된 내용만 자연어로 적는다. 비극·경쟁·풍자 같은 공연 방향과 지어내면 안 될 경계도 같은 문장에 적는다.
+- 일일 경험치 1위는 DB `SELECT character_name, level, xp FROM characters WHERE level >= 5`를 `~/work/notes/openmmo-YYYY-MM-DD-xp.tsv`로 남기고 직전 tsv와 xp 차이 1위를 적는다. 같은 사람이 이어지면 새 줄 대신 며칠째인지 기존 문장을 갱신한다.
+- 원장은 기본적으로 추가 전용이다. 기존 문장을 고치는 예외는 연속 기록의 횟수 갱신, 개명(`renamed to`), 삭제(`Character id=N deleted`), 어뷰즈로 무효화된 성과 제거뿐이다. 같은 사람의 같은 종류 사건은 첫 번과 연속 기록만 남긴다.
 - 봇도 동일하게 오른다. `npc_` 계정만 제외. 금액·IP·계정명은 원장에 넣지 않는다.
-- 최대 영지 후보는 아래 읽기 전용 조회로 구한다. 구획은32×32m이며 왕령은 제외한다. 최대값이 동률이면 각 소유자를 `DATE largest_estate NAME plots=N tied=true`로, 단독이면 `tied=false`로 기록한다. 결과가 없으면 후보도 없다. 현재 캐릭터명과 기존 원장을 대조하고, 같은 소유자의 같은 규모를 매일 중복 기록하지 않는다. 면적은 토지 소유만 뜻하며 집·농장·정복을 지어내지 않는다.
+- 최대 영지 후보는 아래 읽기 전용 조회로 구한다. 구획은32×32m이며 왕령은 제외한다. 최대값이 동률이면 각 소유자의 자연어 기록에 공동 최대임을 명시하고, 단독이면 단독 최대라고 적는다. 결과가 없으면 후보도 없다. 현재 캐릭터명과 기존 원장을 대조하고, 같은 소유자의 같은 규모를 매일 중복 기록하지 않는다. 면적은 토지 소유만 뜻하며 집·농장·정복을 지어내지 않는다는 공연 방향도 기록한다.
   ```sql
   WITH sizes AS (
     SELECT e.id AS estate_id, c.character_name, COUNT(*) AS plots

@@ -850,7 +850,10 @@ mod tests {
     #[test]
     fn a_tale_is_a_section_of_its_own() {
         let (state, _rx) = test_state();
-        let deed = crate::tales::Deed::parse("2026-09-02 boss_kill Alder ogre_boss").unwrap();
+        let deed = crate::tales::Deed::parse(
+            "2026-09-02 | Alder | Alder slew the Ogre Warlord. Celebrate the victory.",
+        )
+        .unwrap();
         let section = crate::tales::prompt_section(&deed, crate::tales::Lang::Korean);
         let prompt = build_prompt(&state, &[], &[], &[], None, None, None, Some(section));
         assert!(prompt.contains("=== TONIGHT'S TALE"), "{prompt}");
