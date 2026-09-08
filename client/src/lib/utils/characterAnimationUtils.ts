@@ -407,8 +407,9 @@ export async function retargetAnimationsForCharacterModel(
 
   targetSkinnedMesh.skeleton.pose()
   sourceSkinnedMesh.skeleton.pose()
-  targetSkinnedMesh.updateMatrixWorld(true)
-  sourceSkinnedMesh.updateMatrixWorld(true)
+  // Rebuild detached ancestors too; cached world transforms may include the player's position.
+  targetSceneClone.updateMatrixWorld(true)
+  retargetSourceClone.updateMatrixWorld(true)
 
   if (hasEquivalentSkeletonRestPose(targetSkinnedMesh, sourceSkinnedMesh)) {
     return clips
@@ -437,7 +438,7 @@ export async function retargetAnimationsForCharacterModel(
 
     try {
       targetSkinnedMesh.skeleton.pose()
-      targetSkinnedMesh.updateMatrixWorld(true)
+      targetSceneClone.updateMatrixWorld(true)
 
       const retargetedClip = SkeletonUtils.retargetClip(
         targetSkinnedMesh,

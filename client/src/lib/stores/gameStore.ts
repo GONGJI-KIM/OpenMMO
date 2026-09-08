@@ -42,6 +42,7 @@ interface PlayerBase {
   maxHealth: number
   characterClass: CharacterClass
   gender: Gender
+  mounted?: boolean
   torchOn?: boolean
   /** Soaked, so nearby clients draw wet footprints (doc/DEBUFF.md). */
   wet?: boolean

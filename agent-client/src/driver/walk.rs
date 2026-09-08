@@ -491,7 +491,7 @@ async fn step_along(
             .send_step(x, z, wp.floor, to_wp.rotation(), background, sprint)
             .await
         {
-            Ok(sprinting) => Step::Sent(travel_ms(dist, sprinting, s.self_move_mult)),
+            Ok(sprinting) => Step::Sent(travel_ms(dist, sprinting, s.movement_speed_mult())),
             Err(e) => {
                 error!("Failed to send a walk step: {e}");
                 Step::Error
@@ -534,7 +534,7 @@ async fn nudge(
     {
         Ok(sprinting) => {
             debug!("A* had no leg to walk — nudging {dist:.1}m on");
-            Step::Sent(travel_ms(dist, sprinting, s.self_move_mult))
+            Step::Sent(travel_ms(dist, sprinting, s.movement_speed_mult()))
         }
         Err(e) => {
             error!("Failed to send a nudge step: {e}");

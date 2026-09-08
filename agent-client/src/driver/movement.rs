@@ -222,7 +222,7 @@ pub(super) async fn execute_schedule_move(state: &Arc<Mutex<SharedState>>, entry
         let walk_ms = travel_ms(
             PlanarDelta::between(&from, &target).dist,
             false,
-            s.self_move_mult,
+            s.movement_speed_mult(),
         );
         s.suppress_pose_for(walk_ms as f32 / 1000.0);
         for (i, leg) in force_move_legs(&from, target).into_iter().enumerate() {

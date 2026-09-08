@@ -140,7 +140,8 @@ pub const NPC_TOKEN_FILENAME: &str = "npc_token";
 /// v60: player house-scroll placement preview and authoritative placement.
 /// v61: persistent estate storage chests with atomic, weight-limited transfers.
 /// v62: estate editor tabs can request an authenticated landscaping mode.
-pub const PROTOCOL_VERSION: u32 = 62;
+/// v63: horse mounting state and mount changes.
+pub const PROTOCOL_VERSION: u32 = 63;
 
 /// Fingerprint of the dungeon layout generator this build compiled, stamped by
 /// `build.rs`. Layouts never travel the wire — both sides generate them from
@@ -339,6 +340,7 @@ mod tests {
             object_id: None,
             last_combat_at: 0,
             client_kind: Default::default(),
+            mounted: false,
             ready_at: 0,
             back_color: None,
             back_texture: None,

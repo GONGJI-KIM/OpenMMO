@@ -44,6 +44,15 @@ fn looks_like_monster_id(s: &str) -> bool {
 }
 
 impl SharedState {
+    pub fn movement_speed_mult(&self) -> f32 {
+        self.self_move_mult
+            * if self.self_player.as_ref().is_some_and(|p| p.mounted) {
+                onlinerpg_shared::world::HORSE_MOVE_MULT
+            } else {
+                1.0
+            }
+    }
+
     /// Resolve a visible `move` target by id shape, then by exact name.
     pub fn resolve_move_target(&self, raw: &str) -> Result<MoveTarget, MoveTargetError> {
         let asked = raw.trim();

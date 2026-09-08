@@ -9,6 +9,7 @@ import {
   hasTargetChanged,
   DEFAULT_MOVEMENT_CONFIG,
   SPRINT_SPEED_MULT,
+  HORSE_MOVE_MULT,
   scaleMovementConfig,
   type Position,
   type MovementState,
@@ -27,6 +28,15 @@ const MOVEMENT_CONFIG: MovementConfig = {
 const SPRINT_MOVEMENT_CONFIG = scaleMovementConfig(
   MOVEMENT_CONFIG,
   SPRINT_SPEED_MULT
+)
+
+const HORSE_MOVEMENT_CONFIG = scaleMovementConfig(
+  MOVEMENT_CONFIG,
+  HORSE_MOVE_MULT
+)
+const HORSE_SPRINT_MOVEMENT_CONFIG = scaleMovementConfig(
+  SPRINT_MOVEMENT_CONFIG,
+  HORSE_MOVE_MULT
 )
 
 /// Far enough that the player went somewhere, rather than the resting flush
@@ -150,9 +160,14 @@ class PlayerStateManager {
 
       // Calculate movement step
       const sprinting = this.targetSprinting.get(playerId) ?? false
-      const movementConfig = sprinting
-        ? SPRINT_MOVEMENT_CONFIG
-        : MOVEMENT_CONFIG
+      const mounted = otherPlayers.get(playerId)?.mounted
+      const movementConfig = mounted
+        ? sprinting
+          ? HORSE_SPRINT_MOVEMENT_CONFIG
+          : HORSE_MOVEMENT_CONFIG
+        : sprinting
+          ? SPRINT_MOVEMENT_CONFIG
+          : MOVEMENT_CONFIG
       const result = calculateMovementStep(
         currentPos,
         movement,

@@ -36,6 +36,7 @@ export type ServerPlayer = {
   class: CharacterClass
   gender: Gender
   is_official_npc: boolean
+  mounted?: boolean
   torch_on: boolean
   floor_level: number
   object_type?: string

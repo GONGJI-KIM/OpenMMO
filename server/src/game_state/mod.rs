@@ -246,6 +246,7 @@ mod land;
 mod landscaping;
 mod monster;
 mod monster_ai;
+mod mounts;
 mod party;
 mod passability;
 mod player;

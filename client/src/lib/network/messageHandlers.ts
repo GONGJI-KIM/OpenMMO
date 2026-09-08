@@ -255,6 +255,7 @@ function toRemotePlayer(sp: ServerPlayer): RemotePlayer {
     maxHealth: sp.max_health,
     characterClass: sp.class,
     gender: sp.gender,
+    mounted: sp.mounted ?? false,
     torchOn: sp.torch_on,
     wet: sp.wet ?? false,
     title: sp.title ?? null,
@@ -1286,6 +1287,11 @@ export function handleServerMessage(
         break
       }
       updatePlayer(data.player_id, { torchOn: data.enabled })
+      break
+    }
+
+    case 'PlayerMountChanged': {
+      updatePlayer(data.player_id, { mounted: data.mounted })
       break
     }
 

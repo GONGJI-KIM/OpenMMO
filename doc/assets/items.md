@@ -128,3 +128,13 @@
     - 추가 조경 견본집 7종은 기존 `scroll.glb`와 `scroll_of_return.png`를 재사용한다 (2026-09-06). 원본 출처·라이선스는 이 문서의 해당 스크롤 항목을 따른다. 새로 생성한 에셋은 없다.
     - Blender 재임포트로 크기·바닥 중앙 원점·스케일·삼각형 수·512² 텍스처 3장·발광 없음 확인. 128² 아이콘의 알파·테두리 여백과 두 크기 렌더를 확인했다. 로컬 게임 서버의 모델·아이콘 URL 응답은 각각 파일과 SHA-256이 일치한다. 원본 GLB·작업 blend·큰 렌더·게임 GLB를 Hugging Face에 업로드하고 원격 파일 해시 검증 후 assets.lock에 revision `47b18253aee7daaccd8efb10df8829b02ac8b006`을 기록했다 (2026-09-06).
     - 재현 명령: `blender -b --python-exit-code 1 -P tools/blender-scripts/export_item_asset.py -- --source assets/landscaping_toolbox/Meshy_AI__0906115517_texture.glb --name landscaping_toolbox --size 0.65 --size-axis x --icon-rotation -62 -25 -8 --exposure -0.5`
+- horse_reins.glb / horse_reins.png (고삐) — Blender에서 절차적으로 자체 제작, 2026-09-08.
+  외부 모델·텍스처·AI 생성물 없음. 프로젝트 자체 에셋으로 저장소 라이선스를 따른다.
+  가죽 고리 2개와 황동 링 2개, 폭 0.234 × 길이 0.307 × 높이 0.018m의 바닥에 놓인 자세.
+  텍스처 없는 PBR 재질, 스케일 1, 발광·애니메이션 없음.
+    - 모델 `client/public/models/objects/horse_reins.glb`, packed 작업 파일
+      `assets/horse_reins/horse_reins.blend`. Cycles 투명 직교 렌더 512²→128² RGBA 아이콘
+      `client/public/items/objects/horse_reins.png`. Blender 재임포트·아이콘 육안·로컬 URL 바이트 일치 확인.
+    - 재현: `blender -b --python-exit-code 1 -P tools/blender-scripts/build_horse_reins.py`.
+      무게 0.5, 중첩 불가, 기본가 50000(5골드), Rica 판매. 사용 시 소모 없이 탑승·하차한다.
+      말 모델은 [MAXDESIGN-3D의 Horse, CC BY 4.0](animals.md), 규칙은 [MOUNTS.md](../MOUNTS.md).

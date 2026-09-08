@@ -159,6 +159,7 @@ impl SharedState {
             | ServerMessage::PlayerTorchToggled { .. }
             | ServerMessage::PlayerMainHandChanged { .. }
             | ServerMessage::PlayerBackChanged { .. }
+            | ServerMessage::PlayerMountChanged { .. }
             | ServerMessage::PlayerTitleChanged { .. }
             | ServerMessage::TitleEarned { .. }
             | ServerMessage::PlayerTitles { .. } => EventUrgency::Routine,
@@ -582,6 +583,14 @@ impl SharedState {
             }
             ServerMessage::PlayerJoined { player } | ServerMessage::PlayerAppeared { player } => {
                 self.nearby_players.insert(player.id, player.clone());
+            }
+            ServerMessage::PlayerMountChanged { player_id, mounted } => {
+                if let Some(p) = self.nearby_players.get_mut(player_id) {
+                    p.mounted = *mounted;
+                }
+                if let Some(me) = self.self_player.as_mut().filter(|me| me.id == *player_id) {
+                    me.mounted = *mounted;
+                }
             }
             ServerMessage::PlayerTitleChanged { player_id, title } => {
                 if let Some(p) = self.nearby_players.get_mut(player_id) {

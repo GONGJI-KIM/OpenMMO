@@ -98,6 +98,8 @@ pub struct Player {
     /// maid's bedside match on respawn.
     #[serde(default)]
     pub object_id: Option<u32>,
+    #[serde(default)]
+    pub mounted: bool,
     #[serde(skip)]
     pub last_combat_at: u64,
     /// Which program drives this player, from the `ClientInfo` handshake.
@@ -339,6 +341,7 @@ mod tests {
             object_id: None,
             last_combat_at: 0,
             client_kind: ClientKind::default(),
+            mounted: false,
             ready_at: 0,
             back_color: None,
             back_texture: None,
@@ -383,6 +386,7 @@ mod tests {
             object_id: Some(52),
             last_combat_at: 0,
             client_kind: ClientKind::default(),
+            mounted: false,
             ready_at: 0,
             back_color: None,
             back_texture: None,

@@ -22,6 +22,7 @@
    */
 
   interface Props {
+    mounted?: boolean
     playerPosition?: { x: number; y: number; z: number } | null
     /** Interpolated remote-player poses, the same source their models use. */
     remotePlayers?: Map<number, PlayerState>
@@ -32,6 +33,7 @@
   }
 
   let {
+    mounted = false,
     playerPosition = null,
     remotePlayers = undefined,
     otherPlayers = undefined,
@@ -110,7 +112,7 @@
     // Checked at emit time, so the trail stops the instant the soaking
     // expires even between the server's sweeps.
     const remaining = wetUntil - Date.now()
-    if (playerPosition && remaining > 0) {
+    if (playerPosition && remaining > 0 && !mounted) {
       // The last of the water leaves fainter prints.
       const strength = 0.45 + 0.45 * Math.min(remaining / WET_DURATION_MS, 1)
       localStride = trail(
@@ -129,7 +131,7 @@
       return
     }
     for (const [id, pose] of remotePlayers) {
-      if (!otherPlayers.get(id)?.wet) {
+      if (!otherPlayers.get(id)?.wet || otherPlayers.get(id)?.mounted) {
         remoteStrides.delete(id)
         continue
       }

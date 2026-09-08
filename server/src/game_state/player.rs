@@ -1241,6 +1241,7 @@ impl super::GameState {
     /// broadcast the results. A tick's budget can span several short legs;
     /// consumed waypoints are popped in place, finished queues dropped.
     pub async fn tick_player_movement(&self, dt: f32) {
+        self.validate_horse_mounts().await;
         // Exactly the client's speed: headroom ran the sim to the leg end
         // ahead of the client, and monsters swung at that empty spot.
         let base_step = PLAYER_MOVE_SPEED * dt.max(0.0);
@@ -1274,8 +1275,15 @@ impl super::GameState {
                 let sprinting = waypoints
                     .front()
                     .is_some_and(|intent| intent.sprinting && sprint_allowed);
-                let max_step =
-                    base_step * hunger_mult * onlinerpg_shared::hunger::sprint_move_mult(sprinting);
+                let mount_mult = if player.mounted {
+                    onlinerpg_shared::world::HORSE_MOVE_MULT
+                } else {
+                    1.0
+                };
+                let max_step = base_step
+                    * hunger_mult
+                    * mount_mult
+                    * onlinerpg_shared::hunger::sprint_move_mult(sprinting);
                 let old_position = player.position;
                 let old_floor = player.floor_level;
                 let old_rotation = player.rotation;

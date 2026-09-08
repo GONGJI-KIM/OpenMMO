@@ -48,6 +48,7 @@
   import {
     DEFAULT_MOVEMENT_CONFIG,
     SPRINT_SPEED_MULT,
+    HORSE_MOVE_MULT,
     scaleMovementConfig,
     type Position,
     type MovementState,
@@ -259,7 +260,9 @@
   // The hunger multiplier mirrors the server's own movement sim (doc/HUNGER.md)
   // so prediction and authority agree.
   let speedMult = $derived(
-    ($debugSpeedMode ? 10 : 1) * ($hungerState?.moveMult ?? 1)
+    ($debugSpeedMode ? 10 : 1) *
+      ($hungerState?.moveMult ?? 1) *
+      (currentPlayer?.mounted ? HORSE_MOVE_MULT : 1)
   )
   let clickSprinting = false
   let startingClickMovement = false

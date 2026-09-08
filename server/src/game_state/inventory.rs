@@ -820,6 +820,7 @@ impl super::GameState {
         };
 
         match effect {
+            UseEffect::ToggleMount => self.toggle_horse_mount(player_id).await,
             UseEffect::Heal(dice) => self.use_healing_item(player_id, instance_id, &dice).await,
             UseEffect::Eat(eat) => self.use_eat_item(player_id, instance_id, &eat, None).await,
             UseEffect::PlaceCampfire => self.use_campfire_kit(player_id, instance_id).await,

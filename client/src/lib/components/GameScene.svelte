@@ -1306,6 +1306,7 @@
 {/if}
 
 <GameSceneFootprintsLayer
+  mounted={currentPlayer?.mounted}
   bind:this={footprintsRef}
   playerPosition={currentPlayer?.position ?? null}
   remotePlayers={remotePlayerManager.players}
