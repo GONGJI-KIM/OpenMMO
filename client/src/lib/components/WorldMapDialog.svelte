@@ -68,7 +68,16 @@
   import { gameStore, isAdminUser, addChatMessage } from '../stores/gameStore'
   import { partyRoster, partyPositions } from '../stores/partyStore'
   import { worldMapVisible, landPlotsVisible } from '../stores/debugStore'
-  import { discoveredDungeonIds } from '../stores/dungeonStore'
+  import {
+    discoveredDungeonIds,
+    currentDungeonDepth,
+  } from '../stores/dungeonStore'
+  import {
+    playerInsideHouseId,
+    playerVisualFloorLevel,
+  } from '../stores/housingStore'
+  import { travelDestination } from '../stores/travelStore'
+  import { isTravelDestinationValid, travelDistance } from '../utils/autoTravel'
   import { houseMapFootprints } from '../stores/housingMapStore'
   import { DUNGEON_ENTRANCES } from '../data/dungeonDefs'
   import { minimapVersion } from '../stores/editorStore'
@@ -134,6 +143,34 @@
   // --- Zoom state (in regions/km) ---
   let zoomSpan = $state(DEFAULT_ZOOM)
   let initializedForOpen = $state(false)
+  let selectingDestination = $state(false)
+  const canTravel = $derived(
+    $gameStore.isConnected &&
+      !!$gameStore.currentPlayer &&
+      $gameStore.currentPlayer.health > 0 &&
+      $currentDungeonDepth === 0 &&
+      $playerVisualFloorLevel === 0 &&
+      $playerInsideHouseId === null
+  )
+  const travelTooltip = $derived.by(() => {
+    if (selectingDestination) {
+      return 'Click the map to run there. Click again to cancel selection.'
+    }
+    if ($travelDestination) {
+      const distance = travelDistance(
+        { x: playerX, z: playerZ },
+        $travelDestination
+      )
+      const label =
+        distance >= 1000
+          ? `${(distance / 1000).toFixed(1)} km`
+          : `${Math.ceil(distance)} m`
+      return `${label} remaining. Click to stop, or move manually to cancel.`
+    }
+    return canTravel
+      ? 'Destination: click here, then choose a point on the map to travel automatically.'
+      : 'Set a destination while outdoors.'
+  })
   let ownedPlots = $state<OwnedLandPlot[]>([])
   const ownersByRegion = $derived.by(() => {
     const regions = new SvelteMap<string, Map<number, string>>()
@@ -237,6 +274,11 @@
   let renderGeneration = 0
   let renderAtlas: HTMLCanvasElement | null = null
   let renderedView = $state<RenderedView | null>(null)
+  const destinationMarker = $derived(
+    $travelDestination && renderedView
+      ? worldToScreen($travelDestination.x, $travelDestination.z, renderedView)
+      : null
+  )
 
   $effect(() => {
     if (!canvasEl || containerW <= 0 || containerH <= 0) return
@@ -761,6 +803,23 @@
       event.stopPropagation()
       return
     }
+    if (selectingDestination) {
+      event.preventDefault()
+      event.stopPropagation()
+      if (!canTravel) return
+      const point = screenToWorld(event.clientX, event.clientY)
+      if (!point) return
+      if (!isTravelDestinationValid(point)) {
+        addChatMessage({
+          text: 'Choose a destination within the world map.',
+          sender: 'system',
+        })
+        return
+      }
+      travelDestination.set({ x: wrapWorldX(point.x), z: point.z })
+      selectingDestination = false
+      return
+    }
     if (!$isAdminUser) return
     if (event.ctrlKey) {
       event.preventDefault()
@@ -791,6 +850,10 @@
   // macOS turns Ctrl+click into a contextmenu event (no click fires at all),
   // so the teleport shortcut must be caught here too.
   function handleMapContextMenu(event: MouseEvent) {
+    if (selectingDestination) {
+      event.preventDefault()
+      return
+    }
     if (!event.ctrlKey || !$isAdminUser) return
     event.preventDefault()
     event.stopPropagation()
@@ -867,6 +930,34 @@
       <div class="controls">
         <button
           type="button"
+          class="ctrl-btn center-btn"
+          class:active={selectingDestination || $travelDestination !== null}
+          disabled={!canTravel && !$travelDestination && !selectingDestination}
+          title={travelTooltip}
+          aria-label={selectingDestination
+            ? 'Cancel destination selection'
+            : $travelDestination
+              ? 'Stop travel'
+              : 'Set destination'}
+          aria-pressed={selectingDestination || $travelDestination !== null}
+          onclick={() => {
+            if ($travelDestination && !selectingDestination) {
+              travelDestination.set(null)
+            } else {
+              selectingDestination = !selectingDestination
+            }
+          }}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            {#if $travelDestination && !selectingDestination}
+              <rect x="5" y="5" width="14" height="14" rx="1"></rect>
+            {:else}
+              <path d="M5 21V3M5 3h15l-4 5 4 5H5"></path>
+            {/if}
+          </svg></button
+        >
+        <button
+          type="button"
           class="ctrl-btn symbol-btn"
           onclick={zoomIn}
           title="Zoom In"
@@ -927,7 +1018,8 @@
     <div
       class="map-container"
       class:dragging={isDragging}
-      class:editing={$landPlotsVisible && $isAdminUser}
+      class:editing={selectingDestination ||
+        ($landPlotsVisible && $isAdminUser)}
       bind:this={containerEl}
       onpointerdown={handlePointerDown}
       onpointermove={handleMapHover}
@@ -937,6 +1029,17 @@
     >
       <canvas bind:this={canvasEl} class="map-canvas"></canvas>
       <div class="label-layer">
+        {#if destinationMarker}
+          <div
+            class="destination-marker"
+            style="left: {destinationMarker.left}px; top: {destinationMarker.top}px;"
+          >
+            <svg viewBox="0 0 24 32" aria-hidden="true">
+              <path d="M5 30V3M5 3h15l-4 6 4 6H5"></path>
+            </svg>
+            <span>Destination</span>
+          </div>
+        {/if}
         {#each visibleLabels as label (label.key)}
           <div
             class="map-label {label.kind}"
@@ -999,6 +1102,38 @@
 </div>
 
 <style>
+  .ctrl-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .destination-marker {
+    position: absolute;
+    z-index: 2;
+    color: #ffdb75;
+    filter: drop-shadow(0 1px 2px #000);
+  }
+
+  .destination-marker svg {
+    position: absolute;
+    width: 24px;
+    height: 32px;
+    left: -5px;
+    bottom: -2px;
+    fill: #923d24;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linejoin: round;
+  }
+
+  .destination-marker span {
+    position: absolute;
+    left: 22px;
+    bottom: 6px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
   .plot-owner-tooltip {
     position: absolute;
     z-index: 5;
@@ -1082,7 +1217,8 @@
   .header {
     position: relative;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    column-gap: 8px;
     align-items: center;
     flex: 0 0 52px;
     /* The ornate frame overlay hides the top 18/1254 of the square dialog, so

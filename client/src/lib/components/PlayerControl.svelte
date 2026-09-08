@@ -4,7 +4,19 @@
   import { estateFurniturePlacementMode } from '../stores/estateFurniturePlacementStore'
   import { useThrelte } from '@threlte/core'
   import * as THREE from 'three'
-  import { gameStore, hoverTarget, type LocalPlayer } from '../stores/gameStore'
+  import {
+    gameStore,
+    hoverTarget,
+    addChatMessage,
+    type LocalPlayer,
+  } from '../stores/gameStore'
+  import { travelDestination } from '../stores/travelStore'
+  import {
+    planTravelLeg,
+    travelDistance,
+    TRAVEL_ARRIVAL_DISTANCE,
+    type TravelDestination,
+  } from '../utils/autoTravel'
   import { networkManager } from '../network/socket'
   import type { PositionCorrection } from '../network/networkTypes'
   import { monsterManager } from '../managers/monsterManager'
@@ -41,6 +53,7 @@
     debugSpeedMode,
     torchLightEnabled,
     cameraRotationEnabled,
+    teleportLoading,
   } from '../stores/debugStore'
   import { localTorchEquipped, inventoryStore } from '../stores/inventoryStore'
   import { hungerState, SPRINT_MIN_SATIATION } from '../stores/hungerStore'
@@ -266,6 +279,98 @@
   )
   let clickSprinting = false
   let startingClickMovement = false
+  let autoTravelTarget: TravelDestination | null = null
+  let travelPlayerId: number | null = null
+  let travelProgressPosition: TravelDestination | null = null
+  let travelStalledMs = 0
+  let travelPlanCooldownMs = 0
+
+  function cancelAutoTravel(message?: string) {
+    if (!autoTravelTarget) return
+    travelDestination.set(null)
+    if (message) addChatMessage({ text: message, sender: 'system' })
+  }
+
+  function updateAutoTravel(deltaTime: number) {
+    if (!autoTravelTarget) return
+    if (
+      !currentPlayer ||
+      currentPlayer.health <= 0 ||
+      $currentDungeonDepth > 0 ||
+      $playerVisualFloorLevel > 0 ||
+      $playerInsideHouseId !== null ||
+      inputHandler.hasKeysPressed
+    ) {
+      cancelAutoTravel()
+      return
+    }
+    if (getInteractionExitKind(playerState) !== 'none') return
+    travelPlanCooldownMs = Math.max(0, travelPlanCooldownMs - deltaTime)
+    const position = currentPlayer.position
+    if (
+      !travelProgressPosition ||
+      travelDistance(travelProgressPosition, position) > 0.5
+    ) {
+      travelProgressPosition = { x: position.x, z: position.z }
+      travelStalledMs = 0
+    } else {
+      travelStalledMs += Math.min(deltaTime, 100)
+    }
+    if (travelStalledMs > 15_000) {
+      cancelAutoTravel(
+        'Travel stopped: the route is blocked or terrain is unavailable.'
+      )
+      return
+    }
+    const moving = movingState()
+    if (
+      moving &&
+      (moving.waypointIndex < moving.waypoints.length - 1 ||
+        travelDistance(position, moving.target) > 12 ||
+        travelDistance(moving.target, autoTravelTarget) <=
+          TRAVEL_ARRIVAL_DISTANCE)
+    )
+      return
+    if (travelPlanCooldownMs > 0) return
+    travelPlanCooldownMs = 500
+    const leg = planTravelLeg(
+      position,
+      autoTravelTarget,
+      (x, z) => heightManager.hasHeightData(x, z),
+      (target) => findPath(position.x, position.z, 0, target.x, target.z, 0)
+    )
+    if (moving && leg.kind !== 'move') return
+    if (leg.kind === 'waiting') return
+    if (leg.kind === 'arrived') {
+      cancelAutoTravel('Destination reached.')
+      return
+    }
+    if (leg.kind === 'blocked') {
+      cancelAutoTravel('Travel stopped: no walkable route ahead.')
+      return
+    }
+    const target = {
+      ...leg.target,
+      y: sampleHeight(leg.target.x, leg.target.z),
+    }
+    clickSprinting = true
+    startingClickMovement = true
+    runMoveRequest({
+      clickPosition: target,
+      currentPlayer,
+      interactionExit: 'none',
+      isMoving: moving !== null,
+      hasKeyboardInput: false,
+      currentFloor: 0,
+      getFloorAt: () => 0,
+      findPath: () => ({ waypoints: leg.waypoints }),
+      waypointHeight,
+      sendPlayerMove,
+      startSpeed: currentSpeed,
+      actions: createMoveRequestActions(target, {}),
+    })
+    startingClickMovement = false
+  }
 
   function sprintAvailable(): boolean {
     return ($hungerState?.satiation ?? 0) > SPRINT_MIN_SATIATION
@@ -625,6 +730,7 @@
       { x: correction.x, y: correction.y, z: correction.z },
       correction.rotation
     )
+    cancelAutoTravel('Travel stopped after a position correction.')
   }
 
   // Current player state
@@ -739,6 +845,7 @@
 
   // Initiate attack on a monster
   function initiateAttack(monsterId: string) {
+    cancelAutoTravel()
     if (getInteractionExitKind(playerState) === 'pickup') {
       finishPendingPickup()
     }
@@ -800,6 +907,7 @@
   }
 
   function transitionToDead() {
+    cancelAutoTravel()
     const transition = transitionToDeadState(playerState)
     if (transition.kind === 'ignored_already_dead') return
 
@@ -815,6 +923,7 @@
   }
 
   function transitionToRespawned() {
+    cancelAutoTravel()
     if (!currentPlayer) return
 
     const transition = transitionToRespawnedState(playerState, {
@@ -840,7 +949,11 @@
   function checkInteraction() {
     handleInteractKey({
       currentPlayer,
-      consumeInteract: () => inputHandler.consumeInteract(),
+      consumeInteract: () => {
+        const consumed = inputHandler.consumeInteract()
+        if (consumed) cancelAutoTravel()
+        return consumed
+      },
       findNearestDoor: (x, z, y, range) =>
         housingManager.findNearestDoor(x, z, y, range),
       sendToggleDoor: (houseId, roomIndex, wallDir, segmentIndex) =>
@@ -941,7 +1054,10 @@
   }
 
   const movementTickActions = {
-    stopMovement,
+    stopMovement: () => {
+      cancelAutoTravel('Travel stopped: the route is blocked.')
+      stopMovement()
+    },
     triggerJumpFeedback,
     setNextWaypoint: (
       nextCurrentSpeed: number,
@@ -1018,6 +1134,7 @@
 
   // Update player movement (click-to-move) with acceleration/deceleration
   function updatePlayerMovement(deltaTime: number) {
+    updateAutoTravel(deltaTime)
     const m = movingState()
     runPlayerMovementTick({
       deltaTime,
@@ -1079,7 +1196,10 @@
   }
 
   function updateKeyboardMovement(deltaTime: number) {
-    if (inputHandler.hasKeysPressed) clearDoorInteractionRetry()
+    if (inputHandler.hasKeysPressed) {
+      cancelAutoTravel()
+      clearDoorInteractionRetry()
+    }
     const rawDirection = inputHandler.getMovementDirection()
     const direction =
       rawDirection && currentPlayer
@@ -1239,6 +1359,7 @@
       stopAtHouseEntrance?: boolean
     } = {}
   ) {
+    cancelAutoTravel()
     // Any fresh movement cancels a pending prop break/open (breakProp/openProp
     // re-arm it after their own walk-up call below).
     dungeonManager.clearPendingBreak()
@@ -1310,6 +1431,7 @@
     intent: Extract<ClickIntent, { type: 'interact_object' }>,
     claim = true
   ) {
+    cancelAutoTravel()
     if (getInteractionExitKind(playerState) === 'pickup') {
       finishPendingPickup()
     }
@@ -1346,6 +1468,7 @@
 
   /** Lie down on the bed the server respawned us on. */
   async function enterRespawnPose(objectType: string) {
+    cancelAutoTravel()
     if (!currentPlayer) return
     const { x, z } = currentPlayer.position
     const { anim, interactOffset, placement, rotation } =
@@ -1369,6 +1492,7 @@
    *  to face, snap to, or claim, and the server already heard about it through
    *  the chat command — so no sendInteractObject here. */
   function startEmote(anim: string) {
+    cancelAutoTravel()
     if (!currentPlayer) return
     if (getInteractionExitKind(playerState) === 'pickup') {
       finishPendingPickup()
@@ -1429,6 +1553,7 @@
   })
 
   function enterPickup(instanceId: number) {
+    cancelAutoTravel()
     // Face the item: an in-reach click never walks, and a blocked walk-up
     // stops facing its travel direction.
     const item = groundItemManager.items.get(instanceId)
@@ -2070,6 +2195,7 @@
     // no movement of its own (a cast, an in-reach interaction). A click that
     // hit nothing at all shouldn't cancel the walk the player is already on.
     if (event.type === 'canvas_intent' && event.intent.type !== 'none') {
+      cancelAutoTravel()
       clearDoorInteractionRetry()
       const m = movingState()
       if (m) m.approach = null
@@ -2100,6 +2226,7 @@
     deltaTime: number,
     options: PlayerControlUpdateOptions
   ) {
+    if (options.editorMode) cancelAutoTravel()
     playerControlMachine.update(deltaTime, options)
   }
 
@@ -2201,8 +2328,46 @@
   currentDungeonDepth.subscribe(() => clearHover())
 
   onMount(() => {
+    const unsubscribeTravel = travelDestination.subscribe((destination) => {
+      const wasTravelling = autoTravelTarget !== null
+      autoTravelTarget = destination
+      travelPlayerId = destination ? (currentPlayer?.id ?? null) : null
+      travelProgressPosition = null
+      travelStalledMs = 0
+      travelPlanCooldownMs = 0
+      if (wasTravelling || (destination && isMovingNow())) {
+        const m = movingState()
+        if (m) m.approach = null
+        stopMovement()
+        if (currentPlayer && currentPlayer.health > 0 && !get(teleportLoading))
+          sendPlayerMove(currentPlayer.position, playerRotation)
+      }
+      if (!destination) return
+      combatController.cancelCombat()
+      clearStandUpTimer()
+      clearPropSwingTimers()
+      clearDoorInteractionRetry()
+      dungeonManager.clearPendingBreak()
+      dungeonManager.clearPendingOpen()
+      const interaction = getInteractionExitKind(playerState)
+      if (interaction === 'pickup') exitPickupInteraction()
+      if (interaction === 'object') exitObjectInteraction()
+    })
+    const unsubscribeTeleport = teleportLoading.subscribe((loading) => {
+      if (loading) cancelAutoTravel()
+    })
+    const unsubscribeTravelPlayer = gameStore.subscribe((state) => {
+      if (
+        !state.isConnected ||
+        !state.currentPlayer ||
+        state.currentPlayer.id !== travelPlayerId ||
+        state.currentPlayer.health <= 0
+      )
+        cancelAutoTravel()
+    })
     const enterPlacementMode = (mode: unknown) => {
       if (!mode) return
+      cancelAutoTravel()
       clearStandUpTimer()
       clearPropSwingTimers()
       currentSpeed = 0
@@ -2254,6 +2419,10 @@
     })
 
     return () => {
+      unsubscribeTravel()
+      unsubscribeTeleport()
+      unsubscribeTravelPlayer()
+      travelDestination.set(null)
       removeInputListeners()
       unsubscribeLandscapingMode()
       unsubscribeFurnitureMode()
