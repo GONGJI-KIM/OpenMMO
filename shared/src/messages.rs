@@ -91,6 +91,13 @@ pub struct BuybackEntry {
     pub price: i64,
 }
 
+/// One line of a stall purchase: `quantity` units off one listing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StallBuyLine {
+    pub instance_id: u64,
+    pub quantity: u32,
+}
+
 /// One line of a batched `BuyItems` request: buy `qty` units of one item def.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradeLineItem {
@@ -601,6 +608,35 @@ pub enum ClientMessage {
         hat_id: u64,
         amount: i64,
     },
+    /// Step up to a stall. An NPC's stall is its shop front and opens the
+    /// priced shop instead; a player's opens the consignment panel.
+    OpenStall {
+        stall_id: u64,
+    },
+    /// Stop watching the stall panel, so listing changes stop being pushed.
+    CloseStall,
+    /// Write the sender's stall sign, or clear it with an empty string.
+    SetStallSign {
+        sign: String,
+    },
+    /// Put `quantity` units of a bag item on the sender's stall at
+    /// `unit_price` copper each. Listing the same instance again re-prices it.
+    ListStallItem {
+        instance_id: u64,
+        quantity: u32,
+        unit_price: i64,
+    },
+    /// Take a listing back off the sender's stall.
+    UnlistStallItem {
+        instance_id: u64,
+    },
+    /// Buy off one stall. All-or-nothing over every line, like `BuyItems`:
+    /// the server re-checks the stock, the wallet, the carried weight and the
+    /// distance to the table, then moves the lot in one swap.
+    BuyFromStall {
+        stall_id: u64,
+        lines: Vec<StallBuyLine>,
+    },
     /// Official NPC only: set `item_def_id` on the table in front of the
     /// occupied chair `chair_object_id`. The server resolves the table top.
     ServeMeal {
@@ -692,11 +728,6 @@ pub enum ClientMessage {
     /// unlike it the target must also be within `MAX_TRADE_DISTANCE`.
     PlayerTradeRequest {
         target_name: String,
-    },
-    /// Open a trade directly against a laid-out stall. Setting a stall out is
-    /// the owner's standing consent, so this skips the request step.
-    PlayerTradeAtStall {
-        stall_id: u64,
     },
     /// Accept or decline a pending trade request from `requester_id`.
     PlayerTradeRespond {
@@ -1620,6 +1651,22 @@ pub enum ServerMessage {
     /// Packed up or left the receiver's AOI.
     StallRemoved {
         stall_id: u64,
+    },
+    /// The whole listing state of the stall the receiver has open. Sent on
+    /// open and re-sent whole on every change: a stale panel is what makes a
+    /// customer click for goods somebody else already took.
+    StallState {
+        stall_id: u64,
+        owner_name: String,
+        sign: String,
+        listings: Vec<crate::stall::StallListing>,
+        /// The receiver owns this stall, so the panel manages instead of buys.
+        owned: bool,
+    },
+    /// A stall in the receiver's AOI changed its sign board.
+    StallSignChanged {
+        stall_id: u64,
+        sign: String,
     },
     /// A performer just set a tip hat down nearby.
     TipHatPlaced {

@@ -3,6 +3,7 @@ import type {
   FishingAction,
   Position,
   PositionCorrection,
+  StallBuyLine,
   TradeLineItem,
 } from './networkTypes'
 import { hmrSingleton } from '../utils/hmr'
@@ -855,9 +856,37 @@ class NetworkManager {
     this.sendMessage({ PlayerTradeRequest: { target_name: targetName } })
   }
 
-  /** Open a trade against a laid-out stall; no request step. */
-  sendPlayerTradeAtStall(stallId: number) {
-    this.sendMessage({ PlayerTradeAtStall: { stall_id: stallId } })
+  /** Step up to a stall: an NPC's opens their shop, a player's the panel. */
+  sendOpenStall(stallId: number) {
+    this.sendMessage({ OpenStall: { stall_id: stallId } })
+  }
+
+  sendCloseStall() {
+    this.sendMessage({ CloseStall: {} })
+  }
+
+  sendSetStallSign(sign: string) {
+    this.sendMessage({ SetStallSign: { sign } })
+  }
+
+  sendListStallItem(instanceId: number, quantity: number, unitPrice: number) {
+    this.sendMessage({
+      ListStallItem: {
+        instance_id: instanceId,
+        quantity,
+        unit_price: unitPrice,
+      },
+    })
+  }
+
+  sendUnlistStallItem(instanceId: number) {
+    this.sendMessage({ UnlistStallItem: { instance_id: instanceId } })
+  }
+
+  /** All-or-nothing over every line, like `sendBuyItems`. */
+  sendBuyFromStall(stallId: number, lines: StallBuyLine[]) {
+    if (lines.length === 0) return
+    this.sendMessage({ BuyFromStall: { stall_id: stallId, lines } })
   }
 
   sendPlayerTradeRespond(requesterId: number, accept: boolean) {

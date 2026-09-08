@@ -774,6 +774,24 @@ impl super::GameState {
         self.blocked_names.write().await.remove(player_id);
     }
 
+    /// Which of `ids` have `name` blocked. One read lock for a whole
+    /// broadcast, and the empty map (the common case) short-circuits.
+    pub(crate) async fn blockers_among(&self, ids: &[PlayerId], name: &str) -> Vec<PlayerId> {
+        let blocked = self.blocked_names.read().await;
+        if blocked.is_empty() {
+            return Vec::new();
+        }
+        ids.iter()
+            .copied()
+            .filter(|id| blocked.get(id).is_some_and(|names| names.contains(name)))
+            .collect()
+    }
+
+    /// Whether that character is under an active mute.
+    pub(super) async fn is_muted(&self, name: &str) -> bool {
+        self.muted_minutes_left(name).await.is_some()
+    }
+
     /// Whether `player_id` has `name` blocked. The name must already be the
     /// canonical spelling — the stored list holds nothing else.
     pub(crate) async fn has_blocked(&self, player_id: &PlayerId, name: &str) -> bool {

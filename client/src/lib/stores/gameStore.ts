@@ -18,6 +18,7 @@ import { resetInstrumentStore } from './instrumentStore'
 import { stopAllInstrumentAudio } from '../managers/instrumentAudio'
 import { groundItemManager } from '../managers/groundItemManager'
 import { campfireManager } from '../managers/campfireManager'
+import { openStall } from './stallStore'
 import { stallManager } from '../managers/stallManager'
 import { refreshBardZone } from '../managers/bardZone'
 
@@ -184,6 +185,7 @@ export const resetGameStore = () => {
   groundItemManager.reset()
   campfireManager.reset()
   stallManager.reset()
+  openStall.set(null)
 }
 
 const MAX_MESSAGES = 100

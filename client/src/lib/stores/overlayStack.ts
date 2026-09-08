@@ -3,6 +3,7 @@ import { characterPanelVisible, inventoryVisible } from './debugStore'
 import { friendPanelVisible } from './friendStore'
 import { emotePanelVisible } from './emoteStore'
 import { shopSession } from './tradeStore'
+import { closeStallPanel } from './stallStore'
 
 /** HUD overlays Escape interacts with. */
 export type OverlayId =
@@ -14,6 +15,7 @@ export type OverlayId =
   | 'inventory'
   | 'trade'
   | 'playerTrade'
+  | 'stall'
   | 'settings'
   | 'loading'
   | 'respawn'
@@ -40,6 +42,7 @@ const OVERLAYS: Record<OverlayId, { layer: number; close?: () => void }> = {
   // Closer registered by the window: once a side is locked Escape
   // must not throw the negotiation away.
   playerTrade: { layer: 1 },
+  stall: { layer: 1, close: () => closeStallPanel() },
   loading: { layer: 2 },
   respawn: { layer: 3 },
   tipHat: { layer: 3 },

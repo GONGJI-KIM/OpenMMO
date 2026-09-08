@@ -144,7 +144,12 @@ pub const NPC_TOKEN_FILENAME: &str = "npc_token";
 /// v63: horse mounting state and mount changes.
 /// v64: mounted steering and PlayerMountTurn cancels travel at the server position.
 /// v65: mounted arc movement and explicit mount steering cancellation.
-pub const PROTOCOL_VERSION: u32 = 65;
+/// v66: player consignment stalls — Stall carries owner_name and sign,
+///      OpenStall/CloseStall/SetStallSign/ListStallItem/UnlistStallItem/
+///      BuyFromStall (batched, all-or-nothing like BuyItems) →
+///      StallState/StallSignChanged. PlayerTradeAtStall is
+///      gone: a stall now sells its listings instead of opening a table.
+pub const PROTOCOL_VERSION: u32 = 66;
 
 /// Fingerprint of the dungeon layout generator this build compiled, stamped by
 /// `build.rs`. Layouts never travel the wire — both sides generate them from

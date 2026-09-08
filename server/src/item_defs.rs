@@ -241,6 +241,8 @@ pub enum UseEffect {
     OpenCoinPouch(String),
     /// Set a tip hat down in front of the user, or pick theirs back up.
     ToggleTipHat,
+    /// Lay the user's stall out in front of them, or fold it back up.
+    ToggleStall,
     /// Ask the client to open the colour picker. Consumes nothing — the
     /// chosen colour comes back as `DyeCape`.
     PromptCapeDye,
@@ -403,6 +405,7 @@ impl ItemDefinition {
             "party_summon_scroll" => Some(UseEffect::SummonParty),
             "coin_catch" => self.dice.clone().map(UseEffect::OpenCoinPouch),
             "tip_hat" => Some(UseEffect::ToggleTipHat),
+            "peddler_stall" => Some(UseEffect::ToggleStall),
             "cape_dye" => Some(UseEffect::PromptCapeDye),
             "cape_texture" => Some(UseEffect::PromptCapeTexture),
             "phoenix_talisman" => self.revive_hp_percent.map(UseEffect::ReviveInPlace),

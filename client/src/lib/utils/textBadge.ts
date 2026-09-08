@@ -74,6 +74,18 @@ export function makeTextBadge(text: string, style: BadgeStyle): TextBadge {
 /** Hover name label style, shared by ground items and interactable props.
  *  Matches the player nametag (TextLabel at fontSize 0.3, outlineWidth 7),
  *  a notch smaller at 0.22 world units per em. */
+/** A stall's sign board: a nametag at 1.5x world size (288 / 1.5), so it
+ *  reads from across a market. */
+export const STALL_SIGN_BADGE_STYLE: BadgeStyle = {
+  id: 'stall-sign',
+  fontPx: 64,
+  pixelsPerUnit: 192,
+  bold: false,
+  color: '#ffffff',
+  outlineColor: '#000000',
+  outlineWidth: 6,
+}
+
 export const NAME_BADGE_STYLE: BadgeStyle = {
   id: 'name',
   fontPx: 64,

@@ -2035,9 +2035,47 @@ async fn handle_client_message(
             }
         }
 
-        ClientMessage::PlayerTradeAtStall { stall_id } => {
+        ClientMessage::OpenStall { stall_id } => {
             if let Some(id) = &state.player_id {
-                game_state.request_player_trade_at_stall(id, stall_id).await;
+                game_state.open_stall(id, stall_id).await;
+            }
+        }
+
+        ClientMessage::CloseStall => {
+            if let Some(id) = &state.player_id {
+                game_state.close_stall(id).await;
+            }
+        }
+
+        ClientMessage::SetStallSign { sign } => {
+            if let Some(id) = &state.player_id {
+                game_state.set_stall_sign(id, sign).await;
+            }
+        }
+
+        ClientMessage::ListStallItem {
+            instance_id,
+            quantity,
+            unit_price,
+        } => {
+            if let Some(id) = &state.player_id {
+                game_state
+                    .list_stall_item(id, instance_id, quantity, unit_price)
+                    .await;
+            }
+        }
+
+        ClientMessage::UnlistStallItem { instance_id } => {
+            if let Some(id) = &state.player_id {
+                game_state.unlist_stall_item(id, instance_id).await;
+            }
+        }
+
+        ClientMessage::BuyFromStall { stall_id, lines } => {
+            if let Some(id) = &state.player_id {
+                game_state
+                    .buy_from_stall(id, stall_id, lines, auth_service)
+                    .await;
             }
         }
 

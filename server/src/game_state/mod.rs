@@ -549,8 +549,9 @@ pub struct GameState {
     campfires: Arc<RwLock<HashMap<u64, hunger::CampfireEntry>>>,
     /// One grill cast per player, resolved by `tick_grills`.
     grill_sessions: Arc<RwLock<HashMap<PlayerId, hunger::GrillSession>>>,
-    /// Laid-out merchant stalls keyed by id, at most one per owner.
-    stalls: Arc<RwLock<HashMap<u64, onlinerpg_shared::stall::Stall>>>,
+    /// Laid-out stalls keyed by owner: every owner move checks the leash, and
+    /// one stall per owner is the rule anyway.
+    stalls: Arc<RwLock<HashMap<PlayerId, stall::StallEntry>>>,
     /// Standing tip hats keyed by owner: every owner move checks the leash,
     /// so the lookup has to be O(1) rather than a scan.
     tip_hats: Arc<RwLock<HashMap<PlayerId, onlinerpg_shared::tip_hat::TipHat>>>,

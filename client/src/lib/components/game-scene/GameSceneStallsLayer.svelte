@@ -6,6 +6,16 @@
   import { currentDungeonDepth } from '../../stores/dungeonStore'
   import { loadGLB } from '../../utils/gltfCache'
   import { hoverMetrics, type HoverMetrics } from '../../utils/hoverMetrics'
+  import { makeTextBadge, STALL_SIGN_BADGE_STYLE } from '../../utils/textBadge'
+
+  /** Board height above the table top, in metres. */
+  const SIGN_LIFT = 0.4
+  /** Widest a board may hang. Sign text is the player's, up to 32 characters,
+   *  which would otherwise sprawl 6 m across the neighbouring stalls. Set so
+   *  signs up to ~20 characters keep the full 1.5x and only the long ones
+   *  shrink to fit. The table is 1.6 m. */
+  const SIGN_MAX_WIDTH_M = 4
+  const NO_RAYCAST = () => {}
 
   let stallModel = $state<THREE.Group | null>(null)
   let group = $state<THREE.Group | undefined>(undefined)
@@ -62,6 +72,22 @@
         }}
       >
         <T is={stallModel.clone(true)} />
+        {#if stall.sign}
+          {@const board = makeTextBadge(stall.sign, STALL_SIGN_BADGE_STYLE)}
+          {@const fit = Math.min(1, SIGN_MAX_WIDTH_M / board.width)}
+          <T.Sprite
+            position.y={stallHover.topY + SIGN_LIFT}
+            scale={[board.width * fit, board.height * fit, 1]}
+            renderOrder={4}
+            raycast={NO_RAYCAST}
+          >
+            <T.SpriteMaterial
+              map={board.texture}
+              transparent={true}
+              depthWrite={false}
+            />
+          </T.Sprite>
+        {/if}
       </T.Group>
     {/each}
   {/if}

@@ -220,6 +220,8 @@ async fn packing_up_before_leaving_folds_our_stall_and_tip_hat() {
             position: p(0.0, 0.0, 1.0),
             rotation: 0.0,
             floor_level: 0,
+            owner_name: "Karl".to_string(),
+            sign: String::new(),
         },
     );
     assert!(s.own_tip_hat().is_some());

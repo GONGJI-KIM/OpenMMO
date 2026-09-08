@@ -15,8 +15,8 @@ use onlinerpg_shared::messages::{
     PlayerTradeItem, PlayerTradeSide, PlayerTradeSlot, PlayerTradeState, PLAYER_TRADE_IDLE_TTL,
     PLAYER_TRADE_REQUEST_TTL,
 };
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 use tracing::{error, info};
 
 /// Outstanding trade requests one player may have pending (spam brake), same
@@ -27,12 +27,8 @@ const PENDING_REQUEST_CAP: usize = 5;
 /// the per-message work and the broadcast size instead.
 const MAX_OFFER_SLOTS: usize = 64;
 
-/// After a customer abandons a stall trade, that stall stays shut to them
-/// this long (cancel/reopen spam brake).
-const STALL_REOPEN_COOLDOWN: Duration = Duration::from_secs(10);
-
-/// The item that places a tip hat. Offering it while the hat is out would
-/// leave the standing hat keyed to its old owner.
+/// Items that hold something up in the world while they sit in the bag:
+/// offering one away would orphan the standing hat or table.
 const TIP_HAT_ITEM: &str = "tip_hat";
 
 const TIMED_OUT: &str = "The trade timed out.";
@@ -77,9 +73,6 @@ pub(crate) struct TradeSession {
     b: TradeSide,
     pub(super) revision: u32,
     last_activity: Instant,
-    /// Set when opened at a stall: range is measured to the table, not the
-    /// owner.
-    stall_id: Option<u64>,
 }
 
 impl TradeSession {
@@ -122,8 +115,6 @@ pub(crate) struct PlayerTrades {
     session_of: HashMap<PlayerId, u64>,
     /// (requester, target) → pending request.
     requests: HashMap<(PlayerId, PlayerId), PendingConsent>,
-    /// (customer, owner) → when that stall opens for them again.
-    stall_cooldowns: HashMap<(PlayerId, PlayerId), Instant>,
 }
 
 impl PlayerTrades {
@@ -132,7 +123,6 @@ impl PlayerTrades {
     fn sweep(&mut self) -> Vec<(PlayerId, PlayerId)> {
         let now = Instant::now();
         self.requests.retain(|_, request| request.expires_at > now);
-        self.stall_cooldowns.retain(|_, until| *until > now);
 
         let expired: Vec<u64> = self
             .sessions
@@ -144,16 +134,12 @@ impl PlayerTrades {
             .collect();
         expired
             .into_iter()
-            .filter_map(|id| {
-                let session = self.remove(id)?;
-                self.cool_stall(&session);
-                Some(session.pair())
-            })
+            .filter_map(|id| Some(self.remove(id)?.pair()))
             .collect()
     }
 
     fn is_empty(&self) -> bool {
-        self.sessions.is_empty() && self.requests.is_empty() && self.stall_cooldowns.is_empty()
+        self.sessions.is_empty() && self.requests.is_empty()
     }
 
     fn remove(&mut self, session_id: u64) -> Option<TradeSession> {
@@ -163,24 +149,11 @@ impl PlayerTrades {
         Some(session)
     }
 
-    /// Charge the customer's reopen cooldown for a stall session they walked
-    /// away from.
-    fn cool_stall(&mut self, session: &TradeSession) {
-        if session.stall_id.is_some() {
-            self.stall_cooldowns
-                .insert(session.pair(), Instant::now() + STALL_REOPEN_COOLDOWN);
-        }
-    }
-
-    /// `player_id` walks out of their session (cancel, disconnect, death). A
-    /// customer leaving a stall is charged; the owner leaving is not.
+    /// `player_id` walks out of their session (cancel, disconnect, death).
     fn leave(&mut self, player_id: &PlayerId) -> Option<(PlayerId, PlayerId)> {
         let session = self
             .session_id_of(player_id)
             .and_then(|id| self.remove(id))?;
-        if session.a.player_id == *player_id {
-            self.cool_stall(&session);
-        }
         Some(session.pair())
     }
 
@@ -192,7 +165,7 @@ impl PlayerTrades {
         self.sessions.get(&self.session_id_of(player_id)?)
     }
 
-    fn open(&mut self, a: PlayerId, b: PlayerId, stall_id: Option<u64>) -> u64 {
+    fn open(&mut self, a: PlayerId, b: PlayerId) -> u64 {
         self.next_id += 1;
         let id = self.next_id;
         self.sessions.insert(
@@ -202,7 +175,6 @@ impl PlayerTrades {
                 b: TradeSide::new(b),
                 revision: 1,
                 last_activity: Instant::now(),
-                stall_id,
             },
         );
         self.session_of.insert(a, id);
@@ -220,6 +192,7 @@ fn resolve_offer(
     slots: &[PlayerTradeSlot],
     item_defs: &crate::item_defs::ItemDefs,
     tip_hat_out: bool,
+    stall_locked: &HashSet<u64>,
 ) -> Result<Vec<PlayerTradeItem>, String> {
     if slots.len() > MAX_OFFER_SLOTS {
         return Err("That's too much for one table.".to_string());
@@ -251,6 +224,9 @@ fn resolve_offer(
         if tip_hat_out && item.item_def_id == TIP_HAT_ITEM {
             return Err("Pick your tip hat back up first.".to_string());
         }
+        if stall_locked.contains(&slot.instance_id) {
+            return Err("Take that off your stall first.".to_string());
+        }
         let quantity = totals[&slot.instance_id];
         if quantity > item.quantity {
             return Err("You don't have that many.".to_string());
@@ -281,7 +257,7 @@ fn offer_weight(
 }
 
 /// 1g = 100s = 10,000c, matching the client's display split.
-fn format_copper(copper: i64) -> String {
+pub(super) fn format_copper(copper: i64) -> String {
     let (gold, rest) = (copper / 10_000, copper % 10_000);
     let (silver, copper) = (rest / 100, rest % 100);
     let mut parts = Vec::new();
@@ -314,7 +290,7 @@ fn ledger_items(items: &[PlayerTradeItem]) -> String {
 }
 
 /// Take `quantity` units of `instance_id` out of the bag.
-fn take_from_bag(inv: &mut PlayerInventory, instance_id: u64, quantity: u32) -> bool {
+pub(super) fn take_from_bag(inv: &mut PlayerInventory, instance_id: u64, quantity: u32) -> bool {
     let Some(idx) = inv
         .bag
         .iter()
@@ -369,30 +345,46 @@ impl super::GameState {
         instance_id: u64,
         action: &str,
     ) -> bool {
-        if self.trade_reserved_quantity(player_id, instance_id).await == 0 {
-            return false;
+        if self.trade_reserved_quantity(player_id, instance_id).await > 0 {
+            self.send_system_message(
+                player_id,
+                &format!("You can't {action} something you've put on the trade table."),
+            )
+            .await;
+            return true;
         }
-        self.send_system_message(
-            player_id,
-            &format!("You can't {action} something you've put on the trade table."),
-        )
-        .await;
-        true
+        if self.stall_reserved_quantity(player_id, instance_id).await > 0 {
+            self.send_system_message(
+                player_id,
+                &format!("You can't {action} something you've put out on your stall."),
+            )
+            .await;
+            return true;
+        }
+        false
     }
 
     /// Refuse a def-keyed bulk action while a trade is open. Those paths draw
     /// by definition and lowest enchant first, so they cannot be reconciled
     /// against instance-level reservations.
     pub(super) async fn reject_if_trading(&self, player_id: &PlayerId, action: &str) -> bool {
-        if self.live_session(player_id).await.is_none() {
-            return false;
+        if self.live_session(player_id).await.is_some() {
+            self.send_system_message(
+                player_id,
+                &format!("Finish your trade before you {action} in bulk."),
+            )
+            .await;
+            return true;
         }
-        self.send_system_message(
-            player_id,
-            &format!("Finish your trade before you {action} in bulk."),
-        )
-        .await;
-        true
+        if self.stall_has_listings(player_id).await {
+            self.send_system_message(
+                player_id,
+                &format!("Clear your stall before you {action} in bulk."),
+            )
+            .await;
+            return true;
+        }
+        false
     }
 
     async fn announce_ended(
@@ -487,45 +479,6 @@ impl super::GameState {
             pb.position,
             pb.floor_level,
         ))
-    }
-
-    /// The stall still stands, its owner is online, and the customer is at
-    /// the table. The owner may move about behind it.
-    async fn customer_at_stall(
-        &self,
-        customer: &PlayerId,
-        owner: &PlayerId,
-        stall_id: u64,
-    ) -> bool {
-        let stall = self
-            .stalls
-            .read()
-            .await
-            .get(&stall_id)
-            .filter(|stall| stall.owner == *owner)
-            .map(|stall| (stall.position, stall.floor_level));
-        let Some((position, floor_level)) = stall else {
-            return false;
-        };
-        let players = self.players.read().await;
-        if !players.contains_key(owner) {
-            return false;
-        }
-        players.get(customer).is_some_and(|p| {
-            within_trade_range(reachable_dist_sq(
-                p.position,
-                p.floor_level,
-                position,
-                floor_level,
-            ))
-        })
-    }
-
-    async fn session_in_range(&self, a: &PlayerId, b: &PlayerId, stall_id: Option<u64>) -> bool {
-        match stall_id {
-            Some(stall_id) => self.customer_at_stall(a, b, stall_id).await,
-            None => self.trade_partners_in_range(a, b).await,
-        }
     }
 
     /// Ask a named player to trade.
@@ -663,96 +616,6 @@ impl super::GameState {
         }
     }
 
-    /// Open a trade against a laid-out stall. The stall standing there is its
-    /// owner's consent, so there is no request step. Refusals go to chat: the
-    /// trade window is not open yet to show them in.
-    pub async fn request_player_trade_at_stall(&self, player_id: &PlayerId, stall_id: u64) {
-        let Some(owner) = self
-            .stalls
-            .read()
-            .await
-            .get(&stall_id)
-            .map(|stall| stall.owner)
-        else {
-            self.send_system_message(player_id, "That stall is gone.")
-                .await;
-            return;
-        };
-        if owner == *player_id {
-            self.send_system_message(player_id, "That's your own stall.")
-                .await;
-            return;
-        }
-        let (customer, owner_is_npc) = {
-            let players = self.players.read().await;
-            (
-                players
-                    .get(player_id)
-                    .map(|p| (p.name.clone(), p.is_official_npc)),
-                players.get(&owner).map(|p| p.is_official_npc),
-            )
-        };
-        let Some((customer_name, customer_is_npc)) = customer else {
-            return;
-        };
-        if customer_is_npc {
-            self.send_system_message(player_id, "Trading is for player travelers.")
-                .await;
-            return;
-        }
-        match owner_is_npc {
-            None => {
-                self.send_system_message(player_id, "That stall is gone.")
-                    .await;
-                return;
-            }
-            // An NPC's stall is their shop front: same intent, but it belongs
-            // in the priced shop flow, not the free-form table.
-            Some(true) => {
-                self.open_shop(player_id, &owner, true).await;
-                return;
-            }
-            Some(false) => {}
-        }
-        if !self.customer_at_stall(player_id, &owner, stall_id).await {
-            self.send_system_message(player_id, "Step up to the stall first.")
-                .await;
-            return;
-        }
-        // Indistinguishable from a busy stall, so the block stays invisible.
-        let busy = "The stallholder is busy with someone else.";
-        if self.has_blocked(&owner, &customer_name).await {
-            self.send_system_message(player_id, busy).await;
-            return;
-        }
-
-        let opened = {
-            let mut trades = self.player_trades.write().await;
-            let key = (*player_id, owner);
-            if trades.session_id_of(player_id).is_some() {
-                Err("You're already trading.")
-            } else if trades.session_id_of(&owner).is_some() {
-                Err(busy)
-            } else if trades
-                .stall_cooldowns
-                .get(&key)
-                .is_some_and(|until| *until > Instant::now())
-            {
-                Err("Give the stallholder a moment.")
-            } else {
-                Ok(trades.open(*player_id, owner, Some(stall_id)))
-            }
-        };
-        match opened {
-            Err(reason) => self.send_system_message(player_id, reason).await,
-            Ok(id) => {
-                self.cancel_live_instrument_if_active(player_id).await;
-                self.cancel_live_instrument_if_active(&owner).await;
-                self.broadcast_trade(id).await;
-            }
-        }
-    }
-
     async fn trade_request_failed(&self, requester_id: &PlayerId, target_name: &str, reason: &str) {
         self.send_direct_message(
             requester_id,
@@ -798,7 +661,7 @@ impl super::GameState {
             } else if !in_range {
                 Some(Err("you drifted too far apart.".to_string()))
             } else {
-                Some(Ok(trades.open(*requester_id, *target_id, None)))
+                Some(Ok(trades.open(*requester_id, *target_id)))
             }
         };
 
@@ -862,12 +725,13 @@ impl super::GameState {
             return;
         }
         let tip_hat_out = self.tip_hats.read().await.contains_key(player_id);
+        let stall_locked = self.stall_locked_instances(player_id).await;
         let resolved = {
             let inventories = self.inventories.read().await;
             let Some(inv) = inventories.get(player_id) else {
                 return;
             };
-            resolve_offer(inv, &slots, &self.item_defs, tip_hat_out)
+            resolve_offer(inv, &slots, &self.item_defs, tip_hat_out, &stall_locked)
         };
         let resolved = match resolved {
             Ok(items) => items,
@@ -954,18 +818,13 @@ impl super::GameState {
             let trades = self.player_trades.read().await;
             trades.session_id_of(player_id).and_then(|id| {
                 let session = trades.sessions.get(&id)?;
-                Some((
-                    id,
-                    session.a.player_id,
-                    session.b.player_id,
-                    session.stall_id,
-                ))
+                Some((id, session.a.player_id, session.b.player_id))
             })
         };
-        let Some((session_id, a_id, b_id, stall_id)) = scope else {
+        let Some((session_id, a_id, b_id)) = scope else {
             return;
         };
-        if !self.session_in_range(&a_id, &b_id, stall_id).await {
+        if !self.trade_partners_in_range(&a_id, &b_id).await {
             self.end_trade(session_id, false, "You drifted too far apart.")
                 .await;
             return;
@@ -1036,18 +895,14 @@ impl super::GameState {
         self.announce_ended(ended, false, TIMED_OUT).await;
     }
 
-    /// End a session without swapping anything. An unfinished stall trade
-    /// (the customer drifted off the table) charges the reopen cooldown.
+    /// End a session without swapping anything.
     async fn end_trade(&self, session_id: u64, completed: bool, message: &str) {
-        let ended = {
-            let mut trades = self.player_trades.write().await;
-            trades.remove(session_id).map(|session| {
-                if !completed {
-                    trades.cool_stall(&session);
-                }
-                session.pair()
-            })
-        };
+        let ended = self
+            .player_trades
+            .write()
+            .await
+            .remove(session_id)
+            .map(|session| session.pair());
         self.announce_ended(ended, completed, message).await;
     }
 
@@ -1069,21 +924,6 @@ impl super::GameState {
             trades.leave(player_id)
         };
         self.announce_ended(ended, false, reason).await;
-    }
-
-    /// A packed-up stall takes its open trade with it. The owner's doing, so
-    /// the customer is not charged.
-    pub(super) async fn drop_stall_trade(&self, owner: &PlayerId, stall_id: u64) {
-        let ended = {
-            let mut trades = self.player_trades.write().await;
-            trades
-                .session_id_of(owner)
-                .filter(|id| trades.sessions[id].stall_id == Some(stall_id))
-                .and_then(|id| trades.remove(id))
-                .map(|session| session.pair())
-        };
-        self.announce_ended(ended, false, "The stall was packed up.")
-            .await;
     }
 
     /// The swap itself: validated and mutated under one pair of locks, then
@@ -1112,8 +952,10 @@ impl super::GameState {
             .reserve_instance_ids(incoming_units(&a_items) + incoming_units(&b_items))
             .await;
 
-        // Reads `player_characters`/`hunger`, which rank below the locks taken
-        // next: they have to happen first.
+        // Reads `player_characters`/`hunger`/`stalls`, which rank below the
+        // locks taken next: they have to happen first.
+        let a_stall_locked = self.stall_locked_instances(&a_id).await;
+        let b_stall_locked = self.stall_locked_instances(&b_id).await;
         let a_capacity = self.max_carry_weight(&a_id).await;
         let b_capacity = self.max_carry_weight(&b_id).await;
         let a_armor_mult = self.armor_weight_mult(&a_id).await;
@@ -1160,18 +1002,28 @@ impl super::GameState {
                         quantity: item.quantity,
                     })
                     .collect();
-                resolve_offer(inv, &slots, &self.item_defs, tip_hats.contains_key(id)).is_ok_and(
-                    |resolved| {
-                        resolved.len() == items.len()
-                            && resolved.iter().zip(items).all(|(now, then)| {
-                                now.item_def_id == then.item_def_id
-                                    && now.enchant == then.enchant
-                                    && now.cape_color == then.cape_color
-                                    && now.cape_texture == then.cape_texture
-                                    && now.quantity == then.quantity
-                            })
-                    },
+                let stall_locked = if *id == a_id {
+                    &a_stall_locked
+                } else {
+                    &b_stall_locked
+                };
+                resolve_offer(
+                    inv,
+                    &slots,
+                    &self.item_defs,
+                    tip_hats.contains_key(id),
+                    stall_locked,
                 )
+                .is_ok_and(|resolved| {
+                    resolved.len() == items.len()
+                        && resolved.iter().zip(items).all(|(now, then)| {
+                            now.item_def_id == then.item_def_id
+                                && now.enchant == then.enchant
+                                && now.cape_color == then.cape_color
+                                && now.cape_texture == then.cape_texture
+                                && now.quantity == then.quantity
+                        })
+                })
             };
             if !revalidate(&a_id, &a_items) || !revalidate(&b_id, &b_items) {
                 break 'swap Err("Someone no longer has what they offered.");
