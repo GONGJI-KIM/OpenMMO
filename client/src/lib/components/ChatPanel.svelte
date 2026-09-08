@@ -22,6 +22,7 @@
     shouldFocusChatOnEnter,
   } from '../chat-input-keys'
   import { ChatHistory } from '../chat-history'
+  import { isChatAtBottom } from '../chat-scroll'
   import { mountOverlay } from '../stores/overlayStack'
   import { chatFocusRequest, chatDraftRequest } from '../stores/npcMenuStore'
   import {
@@ -185,20 +186,34 @@
   let fadeTimer: number | undefined
 
   let scrollFrame: number | undefined
+  let followNewMessages = true
+  let scrollTab: Tab = 'all'
+
+  function updateMessageScrollPreference() {
+    if (chatContainer) followNewMessages = isChatAtBottom(chatContainer)
+  }
 
   // Coalesce scrolling into one layout read per frame.
   $effect(() => {
     if (collapsed) return
+    const tabChanged = scrollTab !== activeTab
+    scrollTab = activeTab
     const len =
       activeTab === 'all'
         ? chatMessages.length
         : activeTab === 'party'
           ? partyMessages.length
           : combatMessages.length
-    if (!chatContainer || !len || scrollFrame !== undefined) return
+    if (
+      !chatContainer ||
+      !len ||
+      (!tabChanged && !followNewMessages) ||
+      scrollFrame !== undefined
+    )
+      return
     scrollFrame = requestAnimationFrame(() => {
       scrollFrame = undefined
-      if (!collapsed && chatContainer) {
+      if (!collapsed && chatContainer && (tabChanged || followNewMessages)) {
         chatContainer.scrollTop = chatContainer.scrollHeight
       }
     })
@@ -237,6 +252,7 @@
   }
 
   function expandChat(focusInput = false) {
+    followNewMessages = true
     collapsed = false
     transcriptVisible = true
     seenCollapsedChatId = chatMessages.at(-1)?.id ?? 0
@@ -496,7 +512,12 @@
       </div>
     {/snippet}
 
-    <div class="chat-messages" bind:this={chatContainer} role="log">
+    <div
+      class="chat-messages"
+      bind:this={chatContainer}
+      role="log"
+      onscroll={updateMessageScrollPreference}
+    >
       {#if activeTab === 'all'}
         {#each chatMessages as entry (entry.id)}
           {@render chatRow(entry)}
