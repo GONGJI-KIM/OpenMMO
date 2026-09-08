@@ -22,6 +22,7 @@ export type AuthenticatedUseAction =
   | 'estate_storage'
   | 'estate_fence'
   | 'land_claim'
+  | 'estate_return'
 
 export interface ItemDefinition {
   id: string

@@ -1765,6 +1765,11 @@ async fn handle_client_message(
         ClientMessage::UseItem { instance_id } => {
             if let Some(id) = &state.player_id {
                 match game_state.authenticated_use_action(id, instance_id).await {
+                    Some(AuthenticatedUseAction::EstateReturn) => {
+                        game_state
+                            .use_estate_return_scroll(id, instance_id, auth_service)
+                            .await;
+                    }
                     Some(AuthenticatedUseAction::EstateStorage) => {
                         game_state
                             .try_start_estate_chest_mode(id, instance_id, auth_service)

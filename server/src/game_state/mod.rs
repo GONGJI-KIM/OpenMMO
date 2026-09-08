@@ -234,6 +234,7 @@ pub(crate) use deals::band_invariant_holds;
 #[cfg(test)]
 pub(crate) use debuff::WET_DEBUFF_ID;
 mod dungeon;
+mod estate_return;
 mod estate_storage;
 mod fence;
 mod friends;

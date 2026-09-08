@@ -53,6 +53,7 @@ pub enum AuthenticatedUseAction {
     EstateStorage,
     EstateFence,
     LandClaim,
+    EstateReturn,
 }
 
 #[derive(Debug, Clone, Deserialize)]

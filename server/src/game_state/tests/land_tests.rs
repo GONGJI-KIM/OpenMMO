@@ -1,6 +1,177 @@
 use super::*;
 use onlinerpg_terrain::land::{plot_addr, LandGrade, REGION_PLOTS};
 
+async fn add_estate_return_scroll(game: &GameState, name: &str) {
+    game.inventories
+        .write()
+        .await
+        .get_mut(&pid(name))
+        .unwrap()
+        .bag
+        .push(bag_item(100, "scroll_of_estate_return", 2));
+}
+
+async fn estate_return_quantity(game: &GameState, name: &str) -> u32 {
+    game.get_player_inventory(&pid(name))
+        .await
+        .unwrap()
+        .bag
+        .iter()
+        .find(|item| item.instance_id == 100)
+        .map_or(0, |item| item.quantity)
+}
+
+#[tokio::test]
+async fn estate_return_scroll_returns_from_dungeon_and_spends_one() {
+    let game = make_test_game_state("estate_return");
+    let auth = make_test_auth("estate_return");
+    let account = auth.login_google("estate-return").unwrap();
+    let (_, mut rx) = land_owner(&game, &auth, &account, "Settler").await;
+    claim_at(&game, &auth, "Settler", 1, 1.0, 1.0).await;
+    add_estate_return_scroll(&game, "Settler").await;
+    let id = pid("Settler");
+    {
+        let mut players = game.players.write().await;
+        let player = players.get_mut(&id).unwrap();
+        player.position = Position {
+            x: 200.0,
+            y: -10.0,
+            z: 200.0,
+        };
+        player.floor_level = -1;
+        player.last_combat_at = GameState::now_ms();
+    }
+    drain(&mut rx);
+    game.use_estate_return_scroll(&id, 100, &auth).await;
+    let player = game.players.read().await[&id].clone();
+    assert_eq!(player.floor_level, 0);
+    assert_eq!(
+        plot_addr(player.position.x, player.position.z),
+        plot_addr(1.0, 1.0)
+    );
+    assert!((player.position.y - 5.0).abs() < 0.01);
+    assert_eq!(estate_return_quantity(&game, "Settler").await, 1);
+    assert!(drain(&mut rx)
+        .iter()
+        .any(|msg| matches!(msg, ServerMessage::PlayerTeleported { .. })));
+    game.use_estate_return_scroll(&id, 100, &auth).await;
+    assert_eq!(estate_return_quantity(&game, "Settler").await, 0);
+    let elsewhere = Position {
+        x: 200.0,
+        y: 5.0,
+        z: 200.0,
+    };
+    game.players.write().await.get_mut(&id).unwrap().position = elsewhere;
+    game.use_estate_return_scroll(&id, 100, &auth).await;
+    assert_eq!(game.players.read().await[&id].position, elsewhere);
+}
+
+#[tokio::test]
+async fn estate_return_scroll_rejects_nonowners_defeat_and_reserved_items() {
+    let game = make_test_game_state("estate_return_guards");
+    let auth = make_test_auth("estate_return_guards");
+    let account = auth.login_google("estate-return-guards").unwrap();
+    let (_, mut rx) = land_owner(&game, &auth, &account, "Settler").await;
+    land_owner(&game, &auth, &account, "Sibling").await;
+    add_estate_return_scroll(&game, "Settler").await;
+    add_estate_return_scroll(&game, "Sibling").await;
+    let id = pid("Settler");
+    game.use_estate_return_scroll(&id, 100, &auth).await;
+    assert_eq!(estate_return_quantity(&game, "Settler").await, 2);
+    assert!(drain(&mut rx).iter().any(|msg| matches!(msg, ServerMessage::SystemMessage { message } if message.contains("don't own an estate"))));
+    claim_at(&game, &auth, "Settler", 1, 1.0, 1.0).await;
+    game.use_estate_return_scroll(&pid("Sibling"), 100, &auth)
+        .await;
+    assert_eq!(estate_return_quantity(&game, "Sibling").await, 2);
+    game.players.write().await.get_mut(&id).unwrap().health = 0;
+    game.use_estate_return_scroll(&id, 100, &auth).await;
+    assert_eq!(estate_return_quantity(&game, "Settler").await, 2);
+    game.players.write().await.get_mut(&id).unwrap().health = 10;
+    game.request_player_trade(&id, "Sibling").await;
+    game.respond_player_trade(&pid("Sibling"), &id, true).await;
+    game.set_player_trade_offer(
+        &id,
+        vec![onlinerpg_shared::messages::PlayerTradeSlot {
+            instance_id: 100,
+            quantity: 1,
+        }],
+        0,
+    )
+    .await;
+    assert_eq!(game.trade_reserved_quantity(&id, 100).await, 1);
+    game.use_estate_return_scroll(&id, 100, &auth).await;
+    assert_eq!(estate_return_quantity(&game, "Settler").await, 2);
+    assert_eq!(game.players.read().await[&id].position.x, 1.0);
+}
+
+#[tokio::test]
+async fn estate_return_scroll_keeps_scroll_when_estate_is_underwater() {
+    let game = make_test_game_state("estate_return_water");
+    let auth = make_test_auth("estate_return_water");
+    let account = auth.login_google("estate-return-water").unwrap();
+    let (character_id, mut rx) = land_owner(&game, &auth, &account, "Settler").await;
+    game.terrain_io
+        .write_land_grades(-1, 0, &vec![LandGrade::Homestead as u8; REGION_PLOTS])
+        .await
+        .unwrap();
+    claim_at(&game, &auth, "Settler", 1, -33.0, 1.0).await;
+    assert_eq!(auth.homestead_plots(character_id).unwrap().len(), 1);
+    add_estate_return_scroll(&game, "Settler").await;
+    let id = pid("Settler");
+    let before = game.players.read().await[&id].position;
+    game.use_estate_return_scroll(&id, 100, &auth).await;
+    assert_eq!(game.players.read().await[&id].position, before);
+    assert_eq!(estate_return_quantity(&game, "Settler").await, 2);
+    assert!(drain(&mut rx).iter().any(|msg| matches!(msg, ServerMessage::SystemMessage { message } if message.contains("No safe outdoor"))));
+}
+
+#[tokio::test]
+async fn estate_return_scroll_avoids_buildings_and_searches_other_owned_plots() {
+    use onlinerpg_shared::pathfinding::{RuntimeFloorGrid, RuntimePassability};
+    let game = make_test_game_state("estate_return_blocked");
+    let auth = make_test_auth("estate_return_blocked");
+    let account = auth.login_google("estate-return-blocked").unwrap();
+    let (_, mut rx) = land_owner(&game, &auth, &account, "Settler").await;
+    claim_at(&game, &auth, "Settler", 1, 1.0, 1.0).await;
+    add_estate_return_scroll(&game, "Settler").await;
+    game.passability_write().insert(
+        "covered_estate".into(),
+        RuntimePassability {
+            house_origin_x: 0.0,
+            house_origin_z: 0.0,
+            min_x: 0.0,
+            max_x: 32.0,
+            min_z: 0.0,
+            max_z: 32.0,
+            floors: vec![RuntimeFloorGrid {
+                floor_level: 0,
+                origin_x: 0,
+                origin_z: 0,
+                width: 32,
+                depth: 32,
+                y_base: 5.0,
+                wall_height: 3.0,
+                cells: vec![0; 32 * 32],
+            }],
+            stairwells: vec![],
+            yields_to_trapped_mover: false,
+            is_ground: true,
+        },
+    );
+    let id = pid("Settler");
+    game.use_estate_return_scroll(&id, 100, &auth).await;
+    assert_eq!(estate_return_quantity(&game, "Settler").await, 2);
+    assert!(drain(&mut rx).iter().any(|msg| matches!(msg, ServerMessage::SystemMessage { message } if message.contains("No safe outdoor"))));
+    claim_at(&game, &auth, "Settler", 2, 33.0, 1.0).await;
+    game.use_estate_return_scroll(&id, 100, &auth).await;
+    let player = game.players.read().await[&id].clone();
+    assert_eq!(
+        plot_addr(player.position.x, player.position.z),
+        plot_addr(33.0, 1.0)
+    );
+    assert_eq!(estate_return_quantity(&game, "Settler").await, 1);
+}
+
 async fn land_owner(
     game: &GameState,
     auth: &crate::auth::AuthService,
