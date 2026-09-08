@@ -33,7 +33,7 @@ async fn horse_reins_toggle_without_consumption_and_broadcast() {
 }
 
 #[tokio::test]
-async fn horse_movement_is_twice_as_fast_and_losing_reins_dismounts() {
+async fn horse_movement_is_three_times_as_fast_and_losing_reins_dismounts() {
     let game = make_test_game_state("horse_speed");
     let id = rider(&game).await;
     game.players.write().await.get_mut(&id).unwrap().rotation = std::f32::consts::FRAC_PI_2;
@@ -52,7 +52,7 @@ async fn horse_movement_is_twice_as_fast_and_losing_reins_dismounts() {
     )
     .await;
     game.tick_player_movement(1.0).await;
-    assert!((game.players.read().await[&id].position.x - 6.0).abs() < 0.01);
+    assert!((game.players.read().await[&id].position.x - 9.0).abs() < 0.01);
     game.inventories
         .write()
         .await
@@ -63,7 +63,7 @@ async fn horse_movement_is_twice_as_fast_and_losing_reins_dismounts() {
     game.tick_player_movement(1.0).await;
     let player = game.players.read().await[&id].clone();
     assert!(!player.mounted);
-    assert!((player.position.x - 9.0).abs() < 0.01);
+    assert!((player.position.x - 12.0).abs() < 0.01);
 }
 
 #[tokio::test]

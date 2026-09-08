@@ -145,7 +145,7 @@ export const DEFAULT_MOVEMENT_CONFIG: MovementConfig = {
 
 // Mirrors shared/src/hunger.rs SPRINT_MOVE_MULT.
 export const SPRINT_SPEED_MULT = 1.5
-export const HORSE_MOVE_MULT = 2
+export const HORSE_MOVE_MULT = 3
 
 export function scaleMovementConfig(
   config: MovementConfig,

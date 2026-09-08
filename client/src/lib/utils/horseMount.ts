@@ -86,7 +86,7 @@ export class HorseMount {
         ? this.current.getClip().duration / (name.endsWith('180') ? 1 : 0.6)
         : name === 'idle'
           ? 1
-          : speed / (name === 'walk' ? 2 : 6)
+          : speed / (name === 'walk' ? 2 : 8)
       if (this.turnName && this.current.paused) {
         this.current.time = this.current.getClip().duration * 0.35
         this.current.paused = false
