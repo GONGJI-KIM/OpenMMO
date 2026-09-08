@@ -65,6 +65,7 @@
   import { closeTopOverlay } from '../stores/overlayStack'
   import { friendPanelVisible } from '../stores/friendStore'
   import { emotePanelVisible, emoteStopRequest } from '../stores/emoteStore'
+  import { instrumentPanelVisible } from '../stores/instrumentStore'
 
   function toDegrees(radians: number) {
     const degrees = (radians * 180) / Math.PI
@@ -78,6 +79,7 @@
   }
 
   function handleKeydown(event: KeyboardEvent) {
+    if ($instrumentPanelVisible && event.key !== 'Escape') return
     // Escape and M/I/C/F are gameplay keys, so this renders for non-admins too.
     if ($isAdminUser && event.ctrlKey && event.key === 'd') {
       event.preventDefault()

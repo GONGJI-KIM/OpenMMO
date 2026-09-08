@@ -34,6 +34,7 @@
     isTranslatorApiSupported,
   } from '../translation/chatTranslator'
   import { draggablePanel } from '../actions/draggablePanel'
+  import { instrumentPanelVisible } from '../stores/instrumentStore'
 
   type Tab = 'all' | 'party' | 'combat'
   const TRANSCRIPT_FADE_DELAY_MS = 20_000
@@ -309,6 +310,7 @@
   }
 
   function handleGlobalKeydown(event: KeyboardEvent) {
+    if ($instrumentPanelVisible) return
     if (event.isComposing || event.keyCode === 229) return
     // While typing, Escape is invisible to the overlay-stack handler
     // (it skips input targets), so close the menu here; no double-close.
