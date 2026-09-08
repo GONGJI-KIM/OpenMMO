@@ -14,8 +14,16 @@ const manifest = new Map(
   )
 )
 
+const HASHED_MODEL_URL = /^\/models\/.+\.[0-9a-f]{8}\.glb$/i
+
 export function assetUrl(path: string): string {
   return manifest.get(path) ?? path
+}
+
+export function getHashedModelAssetUrls(): string[] {
+  return [...new Set(manifest.values())]
+    .filter((url) => HASHED_MODEL_URL.test(url))
+    .sort()
 }
 
 if (manifest.size > 0) DefaultLoadingManager.setURLModifier(assetUrl)
