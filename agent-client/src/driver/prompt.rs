@@ -845,7 +845,7 @@ mod tests {
         assert!(prompt.contains("jake1 tips well"), "{prompt}");
     }
 
-    /// The evening's deed rides in as its own section; with none handed
+    /// The current deed rides in as its own section; with none handed
     /// over there is no section to sing from.
     #[test]
     fn a_tale_is_a_section_of_its_own() {
@@ -854,14 +854,15 @@ mod tests {
             "2026-09-02 | Alder | Alder slew the Ogre Warlord. Celebrate the victory.",
         )
         .unwrap();
-        let section = crate::tales::prompt_section(&deed, crate::tales::Lang::Korean);
+        let section = crate::tales::prompt_section(&deed, crate::tales::Lang::Korean, true);
         let prompt = build_prompt(&state, &[], &[], &[], None, None, None, Some(section));
-        assert!(prompt.contains("=== TONIGHT'S TALE"), "{prompt}");
+        assert!(prompt.contains("=== CURRENT TALE"), "{prompt}");
+        assert!(prompt.contains("Automatic rotation: DUE"), "{prompt}");
         assert!(prompt.contains("Alder slew the Ogre Warlord"), "{prompt}");
         assert!(prompt.contains("Hero: Alder"), "{prompt}");
         assert!(prompt.contains("Language: Korean"), "{prompt}");
         let prompt = build_prompt(&state, &[], &[], &[], None, None, None, None);
-        assert!(!prompt.contains("TONIGHT'S TALE"), "{prompt}");
+        assert!(!prompt.contains("CURRENT TALE"), "{prompt}");
     }
 
     /// Waking in the inn's sick room is a change of place the LLM cannot see

@@ -8,8 +8,8 @@ use tracing::warn;
 
 pub const LEDGER_PATH: &str = "data/tales/ledger.txt";
 
-/// Deeds drawn for one evening's performance.
-pub const PICKS_PER_NIGHT: usize = 3;
+/// Deeds drawn for one performance set.
+pub const PICKS_PER_SET: usize = 3;
 
 /// One ledger line: `DATE | HERO | FACTS AND PERFORMANCE DIRECTION`.
 #[derive(Debug, Clone, PartialEq)]
@@ -62,20 +62,20 @@ pub fn parse_ledger(content: &str) -> Vec<Deed> {
 /// one and the set is not all stories.
 pub const SONGS_BETWEEN_TALES: usize = 2;
 
-/// Tonight's set: a few deeds, one per hero, newer lines favoured, sung in
+/// One performance set: a few deeds, one per hero, newer lines favoured, sung in
 /// turn and round again, a couple of songs apart.
 #[derive(Debug, Default)]
-pub struct TonightsTales {
+pub struct SetTales {
     picks: Vec<Deed>,
-    /// Tales told so far tonight: picks the current one and paces the
+    /// Tales told so far in this set: picks the current one and paces the
     /// language alternation.
     sung: usize,
     /// Our song count at which the next tale is due; 0 until the first.
     next_tale_at: usize,
 }
 
-impl TonightsTales {
-    pub fn draw<R: Rng>(ledger: &[Deed], count: usize, rng: &mut R) -> TonightsTales {
+impl SetTales {
+    pub fn draw<R: Rng>(ledger: &[Deed], count: usize, rng: &mut R) -> SetTales {
         // Rank weight: the newest line is worth `len` times the oldest.
         let mut pool: Vec<(usize, &Deed)> = ledger.iter().enumerate().collect();
         let mut picks = Vec::new();
@@ -87,7 +87,7 @@ impl TonightsTales {
             pool.retain(|(_, d)| d.hero != deed.hero);
             picks.push(deed);
         }
-        TonightsTales {
+        SetTales {
             picks,
             ..Default::default()
         }
@@ -101,12 +101,8 @@ impl TonightsTales {
         self.picks.get(self.sung % self.picks.len().max(1))
     }
 
-    /// The tale to tell now, once our song count has reached its turn.
-    pub fn due(&self, songs_started: usize) -> Option<&Deed> {
-        if songs_started < self.next_tale_at {
-            return None;
-        }
-        self.current()
+    pub fn is_due(&self, songs_started: usize) -> bool {
+        self.current().is_some() && songs_started >= self.next_tale_at
     }
 
     /// Told: the next one waits for this tale's own song plus the gap.
@@ -189,7 +185,7 @@ pub fn audience_lang<'a>(
     room
 }
 
-/// The language of the `nth` tale tonight: the room's, when it is of one
+/// The language of the `nth` tale in the set: the room's, when it is of one
 /// mind; otherwise Korean and English turn about, Korean first.
 pub fn tale_lang(audience: Option<Lang>, nth: usize) -> Lang {
     audience.unwrap_or(if nth.is_multiple_of(2) {
@@ -201,12 +197,13 @@ pub fn tale_lang(audience: Option<Lang>, nth: usize) -> Lang {
 
 /// Prompt section carrying the one deed the bard sings next; the how is
 /// in bard.txt's Tales rules.
-pub fn prompt_section(deed: &Deed, lang: Lang) -> String {
+pub fn prompt_section(deed: &Deed, lang: Lang, automatic_due: bool) -> String {
+    let rotation = if automatic_due { "DUE" } else { "WAITING" };
     format!(
-        "\n=== TONIGHT'S TALE (a true deed — sing it as directed) ===\nDate: {}\nHero: {}\n\
+        "\n=== CURRENT TALE (a true deed — sing it as directed) ===\nAutomatic rotation: {rotation}\n\
+         Date: {}\nHero: {}\n\
          Facts and performance direction: {}\n\
-         Language: {} for the opening line and every verse, whatever the listeners spoke.\n\
-         Tell it before your next song, as your Tales rules say.\n",
+         Language: {} for the opening line and every verse, whatever the listeners spoke.\n",
         deed.date,
         deed.hero,
         deed.brief,
@@ -249,28 +246,31 @@ garbage
     fn the_prompt_passes_the_natural_language_brief_through_unchanged() {
         let brief = "판사가 레벨 34에 도달했다. 과거 어뷰즈를 가볍게 꼬집되 현재 성취는 인정한다.";
         let deed = Deed::parse(&format!("2026-09-07 | 판사 | {brief}")).unwrap();
-        let prompt = prompt_section(&deed, Lang::Korean);
+        let prompt = prompt_section(&deed, Lang::Korean, true);
         assert!(prompt.contains("Date: 2026-09-07"), "{prompt}");
         assert!(prompt.contains("Hero: 판사"), "{prompt}");
         assert!(prompt.contains(&format!("Facts and performance direction: {brief}")));
         assert!(prompt.contains("Language: Korean"), "{prompt}");
         assert!(!prompt.contains("Mood:"), "{prompt}");
+
+        let waiting = prompt_section(&deed, Lang::Korean, false);
+        assert!(waiting.contains("Automatic rotation: WAITING"), "{waiting}");
     }
 
     #[test]
     fn a_draw_takes_one_deed_per_hero_up_to_the_cap() {
         let deeds = parse_ledger(LEDGER);
         let mut rng = StdRng::seed_from_u64(7);
-        let night = TonightsTales::draw(&deeds, 3, &mut rng);
-        assert_eq!(night.picks.len(), 3);
-        let mut names: Vec<&str> = night.picks.iter().map(|d| d.hero.as_str()).collect();
+        let set = SetTales::draw(&deeds, 3, &mut rng);
+        assert_eq!(set.picks.len(), 3);
+        let mut names: Vec<&str> = set.picks.iter().map(|d| d.hero.as_str()).collect();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), 3, "{:?}", night.picks);
+        assert_eq!(names.len(), 3, "{:?}", set.picks);
 
-        let short = TonightsTales::draw(&deeds[..1], 3, &mut rng);
+        let short = SetTales::draw(&deeds[..1], 3, &mut rng);
         assert_eq!(short.picks.len(), 1);
-        assert!(TonightsTales::draw(&[], 3, &mut rng).current().is_none());
+        assert!(SetTales::draw(&[], 3, &mut rng).current().is_none());
     }
 
     #[test]
@@ -279,8 +279,8 @@ garbage
         let mut rng = StdRng::seed_from_u64(1);
         let mut first_pick_is_old = 0;
         for _ in 0..200 {
-            let night = TonightsTales::draw(&deeds, 1, &mut rng);
-            if night.picks[0].date == "2026-09-01" {
+            let set = SetTales::draw(&deeds, 1, &mut rng);
+            if set.picks[0].date == "2026-09-01" {
                 first_pick_is_old += 1;
             }
         }
@@ -325,15 +325,15 @@ garbage
     fn the_set_rotates_and_wraps() {
         let deeds = parse_ledger(LEDGER);
         let mut rng = StdRng::seed_from_u64(3);
-        let mut night = TonightsTales::draw(&deeds, 2, &mut rng);
-        let first = night.current().cloned().unwrap();
-        assert_eq!(night.sung(), 0);
-        night.advance(0);
-        assert_eq!(night.sung(), 1);
-        assert_ne!(night.current(), Some(&first));
-        night.advance(0);
-        assert_eq!(night.current(), Some(&first));
-        let mut empty = TonightsTales::default();
+        let mut set = SetTales::draw(&deeds, 2, &mut rng);
+        let first = set.current().cloned().unwrap();
+        assert_eq!(set.sung(), 0);
+        set.advance(0);
+        assert_eq!(set.sung(), 1);
+        assert_ne!(set.current(), Some(&first));
+        set.advance(0);
+        assert_eq!(set.current(), Some(&first));
+        let mut empty = SetTales::default();
         empty.advance(0);
         assert!(empty.current().is_none());
     }
@@ -343,12 +343,12 @@ garbage
     fn tales_come_two_songs_apart() {
         let deeds = parse_ledger(LEDGER);
         let mut rng = StdRng::seed_from_u64(3);
-        let mut night = TonightsTales::draw(&deeds, 2, &mut rng);
-        assert!(night.due(5).is_some(), "the first tale waits for nothing");
-        night.advance(5);
-        assert!(night.due(6).is_none(), "the tale's own song");
-        assert!(night.due(7).is_none(), "one plain song");
-        assert!(night.due(8).is_some(), "two plain songs");
-        assert!(TonightsTales::default().due(9).is_none());
+        let mut set = SetTales::draw(&deeds, 2, &mut rng);
+        assert!(set.is_due(5), "the first tale waits for nothing");
+        set.advance(5);
+        assert!(!set.is_due(6), "the tale's own song");
+        assert!(!set.is_due(7), "one plain song");
+        assert!(set.is_due(8), "two plain songs");
+        assert!(!SetTales::default().is_due(9));
     }
 }

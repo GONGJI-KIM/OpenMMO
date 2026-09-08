@@ -461,7 +461,7 @@ pub async fn llm_driver(
     // Track the highest urgency since the last prompt
     let mut pending_urgency = LlmPriority::Idle;
     let mut active_schedule: (Option<usize>, Option<u32>) = (None, None);
-    let mut tales = crate::tales::TonightsTales::default();
+    let mut tales = crate::tales::SetTales::default();
     // Our song count when the pending prompt offered a tale, so the gap is
     // measured from the offer rather than from whenever the reply lands.
     let mut tale_offered_at: Option<usize> = None;
@@ -1239,12 +1239,12 @@ async fn run_prompt(
     invoker.send_message(&prompt).await
 }
 
-/// Keep tonight's set in step with the schedule: draw it when a `tales`
+/// Keep the tale set in step with the schedule: draw it when a `tales`
 /// entry begins, keep it through visits (no entry), drop it on any other
-/// entry so the next evening draws afresh. An agent restarted mid-set
+/// entry so the next performance draws afresh. An agent restarted mid-set
 /// draws on its first transition, like any other.
 fn sync_tales(
-    tales: &mut crate::tales::TonightsTales,
+    tales: &mut crate::tales::SetTales,
     schedule: &[ScheduleEntry],
     active: Option<usize>,
     label: &str,
@@ -1253,48 +1253,49 @@ fn sync_tales(
         return;
     };
     if !schedule[i].tales {
-        *tales = crate::tales::TonightsTales::default();
+        *tales = crate::tales::SetTales::default();
         return;
     }
     if tales.current().is_some() {
         return;
     }
     let ledger = crate::tales::load_ledger(crate::tales::LEDGER_PATH);
-    *tales = crate::tales::TonightsTales::draw(
+    *tales = crate::tales::SetTales::draw(
         &ledger,
-        crate::tales::PICKS_PER_NIGHT,
+        crate::tales::PICKS_PER_SET,
         &mut rand::thread_rng(),
     );
     info!(
-        "[{label}] Tonight's tales: {} of {} ledger lines",
+        "[{label}] Performance tales: {} of {} ledger lines",
         tales.len(),
         ledger.len()
     );
 }
 
-/// The deed to hand the LLM this turn, only while the bard is at a `tales`
-/// entry, in the language the room has been speaking.
+/// Hand the LLM the current deed throughout a performance so a direct request
+/// can override the automatic two-song gap.
 fn tale_for(
-    tales: &crate::tales::TonightsTales,
+    tales: &crate::tales::SetTales,
     schedule: &[ScheduleEntry],
     active: Option<usize>,
     state: &SharedState,
     offered_at: &mut Option<usize>,
 ) -> Option<String> {
     *offered_at = None;
-    let deed = tales.due(state.self_songs_started)?;
+    let deed = tales.current()?;
     active.filter(|&i| schedule[i].tales)?;
     *offered_at = Some(state.self_songs_started);
     let self_name = state.self_player.as_ref().map_or("", |p| p.name.as_str());
     let room = crate::tales::audience_lang(state.chat_history(), self_name);
     let lang = crate::tales::tale_lang(room, tales.sung());
-    Some(crate::tales::prompt_section(deed, lang))
+    let automatic_due = tales.is_due(state.self_songs_started);
+    Some(crate::tales::prompt_section(deed, lang, automatic_due))
 }
 
 /// A recital in the turn that offered a tale is it being sung: move on.
 async fn advance_tale_if_sung(
     state: &Arc<Mutex<SharedState>>,
-    tales: &mut crate::tales::TonightsTales,
+    tales: &mut crate::tales::SetTales,
     offered_at: &mut Option<usize>,
 ) {
     let recited = std::mem::take(&mut state.lock().await.recited_this_turn);
@@ -1482,6 +1483,34 @@ mod tests {
 
     use super::*;
     use crate::state::tests::{test_player, test_state};
+
+    #[test]
+    fn a_tale_stays_available_during_the_automatic_song_gap() {
+        use rand::{rngs::StdRng, SeedableRng};
+
+        let ledger = crate::tales::parse_ledger(
+            "2026-09-02 | Alder | Alder slew the Ogre Warlord. Celebrate the victory.",
+        );
+        let mut tales = crate::tales::SetTales::draw(
+            &ledger,
+            crate::tales::PICKS_PER_SET,
+            &mut StdRng::seed_from_u64(1),
+        );
+        let schedule = vec![ScheduleEntry {
+            tales: true,
+            ..Default::default()
+        }];
+        let (mut state, _rx) = test_state();
+        let mut offered_at = None;
+
+        let due = tale_for(&tales, &schedule, Some(0), &state, &mut offered_at).unwrap();
+        assert!(due.contains("Automatic rotation: DUE"), "{due}");
+
+        tales.advance(0);
+        state.self_songs_started = 1;
+        let waiting = tale_for(&tales, &schedule, Some(0), &state, &mut offered_at).unwrap();
+        assert!(waiting.contains("Automatic rotation: WAITING"), "{waiting}");
+    }
 
     /// A visit forces its prompt out at once, so the driver consumes the
     /// ambient event into a real prompt — the backend captures prompts for

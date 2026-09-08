@@ -23,7 +23,8 @@
       "pos": [-1470.0, 1.1, 4750.9],
       "rotation": -50.1,
       "floor_level": 0,
-      "label": "busking pitch on the town square"
+      "label": "busking pitch on the town square",
+      "tales": true
     },
     {
       "at": "18:30",
