@@ -222,6 +222,27 @@ the angler holds one of three stances, changed any time via
   that outlives 60 s throws the hook (`Escaped`): slack-line stalling is not
   a strategy, and neither is walking away (unmanaged tension snaps within
   seconds).
+- **Bold play → bonus fish**: the server counts how long the fish has Run
+  and how much of that the line was held at or above `TENSION_BOLD` (80,
+  just under the red band). That *bold share*, squared and scaled by
+  `BONUS_FISH_MAX_CHANCE` (25%), is the chance — broadcast live as
+  `FishingFight.bonus_chance_pct` — that a second fish of the same species
+  took the trailing hook at landing (`Caught.bonus_fish`). Risk pays twice
+  on purpose: bold play already tires the fish fastest, and now it also pays
+  out, so a cautious angler and a bold one play different games rather than
+  different clocks. Continuous, so there is no threshold to camp on. Junk and
+  coin pouches (rarity 0) never double, and the bonus grants no extra XP.
+
+  | bold share of running time | bonus chance |
+  |---|---|
+  | 25% | 1.6% |
+  | 50% | 6.3% |
+  | 75% | 14.1% |
+  | 100% | 25% |
+
+  The hook-set opens at tension 30 and every rest lets it decay, so the
+  climb back past 80 never counts: a superb human fight lands around a
+  70–85% share (12–18%); the 25% cap is theoretical.
 
 Every beat is broadcast as `FishingFight { bobber, fish_state, tension_pct,
 stamina_pct }` — public information by design, which is what keeps humans

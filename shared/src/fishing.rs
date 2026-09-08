@@ -49,6 +49,9 @@ pub enum FishingOutcome {
         size_cm: u16,
         /// Natural 20 on the quality roll, or at/over the species' trophyCm.
         trophy: bool,
+        /// A second fish of the same kind took the trailing hook — rolled
+        /// with `bonus_fish_chance` at landing. Never junk.
+        bonus_fish: bool,
     },
     /// Hooked too early, too late, or not at all.
     Escaped,
@@ -117,6 +120,36 @@ pub const ESCAPE_XP: u64 = 2;
 pub const TENSION_MAX: f32 = 100.0;
 /// Tension the hook-set itself puts on the line — the fight opens live.
 pub const TENSION_INITIAL: f32 = 30.0;
+
+/// A running fish held at or above this tension counts as *bold* time.
+/// Sits just under the gauge's red band (85): under a human reaction delay
+/// the line can only be kept here by someone reading the fight, and a slip
+/// snaps it. Risk is rewarded twice — it tires the fish fastest *and* feeds
+/// the bonus-fish chance.
+pub const TENSION_BOLD: f32 = 80.0;
+
+/// Bonus-fish chance for a fight held bold from first run to landing. A
+/// second fish is a treat, not the supply: even perfect play doubles one
+/// catch in four.
+pub const BONUS_FISH_MAX_CHANCE: f32 = 0.25;
+
+/// Share (0–1) of the fish's running time the line was held at or above
+/// `TENSION_BOLD`.
+pub fn bold_share(bold_run_ms: f32, run_ms: f32) -> f32 {
+    if run_ms <= 0.0 {
+        return 0.0;
+    }
+    (bold_run_ms / run_ms).clamp(0.0, 1.0)
+}
+
+/// Chance (0–1) of a second fish: `bold_share² · BONUS_FISH_MAX_CHANCE`.
+/// Squared so half-hearted pressure earns almost nothing while a fight held
+/// bold throughout earns the cap; continuous so there is no threshold to
+/// camp on.
+pub fn bonus_fish_chance(bold_run_ms: f32, run_ms: f32) -> f32 {
+    let share = bold_share(bold_run_ms, run_ms);
+    share * share * BONUS_FISH_MAX_CHANCE
+}
 /// Fish pull while Running: `(BASE + PER_RARITY·rarity) · distance factor`,
 /// reduced by skill (`SKILL_PULL_RELIEF_PCT`). Deliberately hot: an
 /// unmanaged run leaves the safe range in about a second and snaps the line
@@ -304,6 +337,33 @@ mod tests {
         // exhausted fish, while a lively one panics before it gets there.
         assert!(CATCH_SLACK_M < PANIC_BAND_M);
         assert!(WATERLINE_MARGIN_M < MIN_FISH_DISTANCE_M);
+    }
+
+    #[test]
+    fn bold_share_is_the_bold_fraction_of_the_run() {
+        assert_eq!(bold_share(0.0, 0.0), 0.0, "no run, no share");
+        assert_eq!(bold_share(0.0, 4_000.0), 0.0);
+        assert_eq!(bold_share(1_000.0, 4_000.0), 0.25);
+        assert_eq!(bold_share(4_000.0, 4_000.0), 1.0);
+        assert_eq!(bold_share(5_000.0, 4_000.0), 1.0, "clamped");
+    }
+
+    // Constant on purpose: this test locks the tuning invariant.
+    #[allow(clippy::assertions_on_constants)]
+    #[test]
+    fn bonus_chance_is_squared_and_capped() {
+        assert_eq!(bonus_fish_chance(0.0, 4_000.0), 0.0);
+        assert_eq!(bonus_fish_chance(4_000.0, 4_000.0), BONUS_FISH_MAX_CHANCE);
+        // Half the run held bold earns a quarter of the cap, not half.
+        assert_eq!(
+            bonus_fish_chance(2_000.0, 4_000.0),
+            0.25 * BONUS_FISH_MAX_CHANCE
+        );
+        assert!(bonus_fish_chance(3_200.0, 4_000.0) < 0.7 * BONUS_FISH_MAX_CHANCE);
+        assert!(
+            BONUS_FISH_MAX_CHANCE <= 0.3,
+            "a bonus, not a second supply line"
+        );
     }
 
     #[test]

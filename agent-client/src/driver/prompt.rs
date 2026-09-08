@@ -569,7 +569,8 @@ pub(crate) fn format_event(state: &SharedState, msg: &ServerMessage) -> Option<S
                     item_def_id,
                     size_cm,
                     trophy,
-                } => caught_line(item_def_id, *size_cm, *trophy),
+                    bonus_fish,
+                } => caught_line(item_def_id, *size_cm, *trophy, *bonus_fish),
                 FishingOutcome::Escaped => {
                     "[Fishing] The fish got away. You can cast again with the fish action."
                         .to_string()
@@ -632,14 +633,15 @@ pub(crate) fn format_event(state: &SharedState, msg: &ServerMessage) -> Option<S
 /// The `[Fishing]` line for a landed catch, with category-aware next steps.
 /// Keep the phrasing in sync with the browser client's `catchMessage`
 /// (client/src/lib/network/fishingMessages.ts).
-fn caught_line(item_def_id: &str, size_cm: u16, trophy: bool) -> String {
+fn caught_line(item_def_id: &str, size_cm: u16, trophy: bool, bonus_fish: bool) -> String {
     match crate::item_defs::get(item_def_id).and_then(|d| d.category.as_deref()) {
         Some("coin_catch") => format!(
             "[Fishing] You hauled up a {item_def_id}. It is in your bag — use it to open it and collect the coins, or fish again."
         ),
         Some("fish") => format!(
-            "[Fishing] You caught a {item_def_id} ({size_cm} cm){}. It is in your bag — you can eat it, sell it, or fish again.",
-            if trophy { " — a TROPHY catch!" } else { "" }
+            "[Fishing] You caught a {item_def_id} ({size_cm} cm){}{}. It is in your bag — you can eat it, sell it, or fish again.",
+            if trophy { " — a TROPHY catch!" } else { "" },
+            if bonus_fish { " A second one took the trailing hook — two in the bag." } else { "" }
         ),
         _ => format!(
             "[Fishing] You fished up a {item_def_id}. It is in your bag — junk like this can be sold if a merchant pays for it, or dropped."
@@ -959,7 +961,7 @@ mod tests {
 
     #[test]
     fn a_fish_is_edible_and_sellable() {
-        let line = caught_line("raw_trout", 34, false);
+        let line = caught_line("raw_trout", 34, false, false);
         assert!(line.contains("caught a raw_trout (34 cm)"), "{line}");
         assert!(line.contains("eat it, sell it"), "{line}");
         assert!(!line.contains("TROPHY"), "{line}");
@@ -967,14 +969,14 @@ mod tests {
 
     #[test]
     fn a_trophy_fish_celebrates() {
-        let line = caught_line("golden_sturgeon", 120, true);
+        let line = caught_line("golden_sturgeon", 120, true, false);
         assert!(line.contains("TROPHY"), "{line}");
         assert!(line.contains("eat it, sell it"), "{line}");
     }
 
     #[test]
     fn junk_is_not_presented_as_edible() {
-        let line = caught_line("old_boot", 40, false);
+        let line = caught_line("old_boot", 40, false, false);
         assert!(line.contains("fished up a old_boot"), "{line}");
         assert!(
             !line.contains("eat"),
@@ -984,7 +986,7 @@ mod tests {
 
     #[test]
     fn a_coin_catch_points_at_the_bag_and_the_use_action() {
-        let line = caught_line("sunken_coin_pouch", 12, false);
+        let line = caught_line("sunken_coin_pouch", 12, false, false);
         assert!(
             line.contains("bag"),
             "the pouch lands in the bag sealed: {line}"

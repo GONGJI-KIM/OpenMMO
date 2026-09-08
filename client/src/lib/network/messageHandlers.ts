@@ -2002,13 +2002,14 @@ export function handleServerMessage(
           addCombatMessage({ text: 'You reel in your line.', sender: 'local' })
         } else if (outcome?.Caught) {
           playFishingSound('catch')
-          const { item_def_id, size_cm, trophy } = outcome.Caught
+          const { item_def_id, size_cm, trophy, bonus_fish } = outcome.Caught
           addCombatMessage({
             text: catchMessage(
               getItemDef(item_def_id),
               item_def_id,
               size_cm,
-              trophy
+              trophy,
+              bonus_fish
             ),
             sender: 'local',
           })

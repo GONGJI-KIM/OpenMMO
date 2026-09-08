@@ -1196,6 +1196,9 @@ pub enum ServerMessage {
         fish_state: fishing::FishState,
         tension_pct: u32,
         stamina_pct: u32,
+        /// Live bonus-fish chance (0–100): the share of the run so far held
+        /// at `TENSION_BOLD`, so the angler sees what bold play is earning.
+        bonus_chance_pct: u32,
     },
     /// The session is over: despawn the bobber and, for the angler, show the
     /// outcome. A caught fish also arrives via the normal `InventoryUpdated`

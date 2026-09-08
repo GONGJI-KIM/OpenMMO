@@ -140,7 +140,9 @@ pub const NPC_TOKEN_FILENAME: &str = "npc_token";
 /// v60: player house-scroll placement preview and authoritative placement.
 /// v61: persistent estate storage chests with atomic, weight-limited transfers.
 /// v62: estate editor tabs can request an authenticated landscaping mode.
-pub const PROTOCOL_VERSION: u32 = 62;
+/// v63: `FishingFight.bonus_chance_pct` and `FishingOutcome::Caught.bonus_fish`
+///      — tension held bold during the fight rolls a second fish.
+pub const PROTOCOL_VERSION: u32 = 63;
 
 /// Fingerprint of the dungeon layout generator this build compiled, stamped by
 /// `build.rs`. Layouts never travel the wire — both sides generate them from

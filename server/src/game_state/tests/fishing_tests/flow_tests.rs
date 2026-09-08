@@ -4,7 +4,7 @@ use super::*;
 /// returning the outcome (plus every message seen on the way). The
 /// policy sees each `FishingFight` beat's state and tension — exactly
 /// what a real client (human gauge or agent reflex) gets.
-async fn fight_to_the_end(
+pub(super) async fn fight_to_the_end(
     game_state: &GameState,
     id: &PlayerId,
     rx: &mut DirectRx,
@@ -276,6 +276,7 @@ async fn full_catch_flow_awards_fish_and_skill_xp() {
     let FishingOutcome::Caught {
         item_def_id: fish_id,
         size_cm,
+        bonus_fish,
         ..
     } = outcome
     else {
@@ -298,15 +299,19 @@ async fn full_catch_flow_awards_fish_and_skill_xp() {
     // the bag; only rarity ≥ 1 (fish) grants XP.
     let defs = ItemDefs::load();
     let def = defs.get(&fish_id).expect("caught def");
+    let rarity = def.rarity_tier.unwrap_or(1);
+    let expected_units = if bonus_fish { 2 } else { 1 };
     let inv = game_state.get_player_inventory(&id).await.unwrap();
-    assert!(inv
+    let units: u32 = inv
         .bag
         .iter()
-        .any(|item| item.item_def_id == fish_id && item.quantity == 1));
+        .filter(|item| item.item_def_id == fish_id)
+        .map(|item| item.quantity)
+        .sum();
+    assert_eq!(units, expected_units);
     assert!(msgs
         .iter()
         .any(|m| matches!(m, ServerMessage::InventoryUpdated { .. })));
-    let rarity = def.rarity_tier.unwrap_or(1);
     let got_xp = msgs.iter().any(|m| {
         matches!(
             m,
@@ -441,33 +446,35 @@ async fn duplicate_hook_during_the_fight_is_ignored() {
     assert!(matches!(outcome, FishingOutcome::Caught { .. }));
 }
 
-/// Neither fish nor junk stack, so every bagged catch is its own slot even
-/// when two of them are the same species — the bag reads as a catch log.
+/// Neither fish nor junk stack, so every bagged catch — bonus fish included —
+/// is its own slot even when two are the same species: the bag reads as a
+/// catch log.
 #[tokio::test(start_paused = true)]
 async fn caught_fish_take_one_bag_slot_each() {
     let game_state = make_test_game_state("fishing_stacks");
     let (id, mut rx) = make_angler(&game_state, "angler_stacker").await;
 
-    let mut bagged_catches = 0u32;
+    let mut bagged_fish = 0u32;
     for _ in 0..3 {
         game_state.start_fishing(&id, water_target()).await;
         advance_until_bite(&game_state, &mut rx).await;
         game_state.respond_fishing(&id, FishingAction::Hook).await;
         let (outcome, _) = fight_to_the_end(&game_state, &id, &mut rx, auto_stance).await;
-        let FishingOutcome::Caught { .. } = outcome else {
-            panic!("perfect play must catch");
+        let FishingOutcome::Caught { bonus_fish, .. } = outcome else {
+            panic!("perfect play must catch, got {outcome:?}");
         };
-        // Every species takes a slot — even a coin pouch arrives sealed.
-        bagged_catches += 1;
+        // Every species takes a slot — even a coin pouch arrives sealed —
+        // and a bonus fish is one more unit in the bag.
+        bagged_fish += if bonus_fish { 2 } else { 1 };
     }
     let inv = game_state.get_player_inventory(&id).await.unwrap();
     let total_fish: u32 = inv.bag.iter().map(|item| item.quantity).sum();
-    assert_eq!(total_fish, bagged_catches);
+    assert_eq!(total_fish, bagged_fish);
     // Fish and junk are both non-stackable, so this holds no matter which
     // species the rolls produced.
     assert_eq!(
         inv.bag.len() as u32,
-        bagged_catches,
+        bagged_fish,
         "each fish should occupy its own bag slot"
     );
     assert!(
