@@ -441,39 +441,26 @@ async fn duplicate_hook_during_the_fight_is_ignored() {
     assert!(matches!(outcome, FishingOutcome::Caught { .. }));
 }
 
-/// Neither fish nor junk stack, so every bagged catch is its own slot even
-/// when two of them are the same species — the bag reads as a catch log.
+/// Every landed catch reaches the bag. How they pile up by species is
+/// covered by `inventory_tests`, where the species is not a random roll.
 #[tokio::test(start_paused = true)]
-async fn caught_fish_take_one_bag_slot_each() {
-    let game_state = make_test_game_state("fishing_stacks");
-    let (id, mut rx) = make_angler(&game_state, "angler_stacker").await;
+async fn every_catch_lands_in_the_bag() {
+    let game_state = make_test_game_state("fishing_catches_bagged");
+    let (id, mut rx) = make_angler(&game_state, "angler_bagger").await;
 
-    let mut bagged_catches = 0u32;
     for _ in 0..3 {
         game_state.start_fishing(&id, water_target()).await;
         advance_until_bite(&game_state, &mut rx).await;
         game_state.respond_fishing(&id, FishingAction::Hook).await;
         let (outcome, _) = fight_to_the_end(&game_state, &id, &mut rx, auto_stance).await;
-        let FishingOutcome::Caught { .. } = outcome else {
-            panic!("perfect play must catch");
-        };
-        // Every species takes a slot — even a coin pouch arrives sealed.
-        bagged_catches += 1;
+        assert!(
+            matches!(outcome, FishingOutcome::Caught { .. }),
+            "perfect play must catch"
+        );
     }
     let inv = game_state.get_player_inventory(&id).await.unwrap();
-    let total_fish: u32 = inv.bag.iter().map(|item| item.quantity).sum();
-    assert_eq!(total_fish, bagged_catches);
-    // Fish and junk are both non-stackable, so this holds no matter which
-    // species the rolls produced.
-    assert_eq!(
-        inv.bag.len() as u32,
-        bagged_catches,
-        "each fish should occupy its own bag slot"
-    );
-    assert!(
-        inv.bag.iter().all(|item| item.quantity == 1),
-        "no fish entry should carry a quantity above one"
-    );
+    let total: u32 = inv.bag.iter().map(|item| item.quantity).sum();
+    assert_eq!(total, 3);
 }
 
 // The fight: cranking the reel against a running fish pumps tension

@@ -52,7 +52,8 @@ endgame combat loot (`server/src/item_defs.rs::equipment_ids_with_min_price`).
   handler, not the tick.
 - **End** (`FishingEnded { outcome }` broadcast): `Caught { item_def_id,
   size_cm, trophy }`, `Escaped`, or `Aborted`. A caught fish arrives through
-  the normal `InventoryUpdated` (its own slot), or spills as a ground item when the
+  the normal `InventoryUpdated` (fish stack by species — size and trophy are
+  announced, not stored), or spills as a ground item when the
   bag can't take the weight — never silently lost. Moving, attacking,
   disconnecting, dying, stowing the rod (unequipping it, or swapping a
   weapon into the main hand), or `FishingStop` aborts the session; gear
