@@ -905,18 +905,21 @@ impl super::GameState {
             })
             .map(|e| e.campfire.clone())
             .collect();
-        let stalls: Vec<_> = self
+        let mut stalls: Vec<_> = self
             .stalls
             .read()
             .await
             .values()
-            .filter(|s| {
-                s.floor_level == player_floor
-                    && s.position.dist_xz_sq(&player_position)
+            .filter(|e| {
+                e.stall.floor_level == player_floor
+                    && e.stall.position.dist_xz_sq(&player_position)
                         <= super::EVENT_DELIVERY_RADIUS * super::EVENT_DELIVERY_RADIUS
             })
-            .cloned()
+            .map(|e| e.stall.clone())
             .collect();
+        for stall in &mut stalls {
+            stall.sign = self.visible_sign(stall, &player_id).await;
+        }
         let tip_hats: Vec<_> = self
             .tip_hats
             .read()
@@ -1006,6 +1009,7 @@ impl super::GameState {
         self.music_performances.write().await.remove(player_id);
         self.remove_live_instrument(player_id).await;
         self.remove_player_stall(player_id).await;
+        self.forget_stall_viewer(player_id).await;
         self.remove_player_tip_hat(player_id).await;
         self.drop_player_trade(player_id, "They left.").await;
         self.last_player_attacks.write().await.remove(player_id);
@@ -2651,26 +2655,37 @@ impl super::GameState {
                 .await;
         }
 
-        let (stalls_left, stalls_entered) = {
+        // The mover's own leash is read off the one lock this pass already takes.
+        let (stalls_left, stalls_entered, stall_strayed) = {
             let stalls = self.stalls.read().await;
             let (left, entered) = aoi_diff(
                 stalls.values(),
-                |s| (s.position, s.floor_level),
+                |e| (e.stall.position, e.stall.floor_level),
                 (old_position, old_floor),
                 (&player.position, new_floor),
             );
             (
-                left.into_iter().map(|s| s.id).collect::<Vec<_>>(),
-                entered.into_iter().cloned().collect::<Vec<_>>(),
+                left.into_iter().map(|e| e.stall.id).collect::<Vec<_>>(),
+                entered
+                    .into_iter()
+                    .map(|e| e.stall.clone())
+                    .collect::<Vec<_>>(),
+                stalls
+                    .get(player_id)
+                    .is_some_and(|e| e.stall.strayed_from(&player.position, new_floor)),
             )
         };
         for stall_id in stalls_left {
             self.send_direct_message(player_id, ServerMessage::StallRemoved { stall_id })
                 .await;
         }
-        for stall in stalls_entered {
+        for mut stall in stalls_entered {
+            stall.sign = self.visible_sign(&stall, player_id).await;
             self.send_direct_message(player_id, ServerMessage::StallAppeared { stall })
                 .await;
+        }
+        if stall_strayed {
+            self.pack_up_strayed_stall(player_id).await;
         }
 
         // The mover's own leash is read here too, off the one lock this pass

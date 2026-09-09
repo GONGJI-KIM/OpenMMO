@@ -84,17 +84,6 @@ async fn complete_trade(pair: &TradePair) {
         .await;
 }
 
-async fn move_x(game_state: &GameState, player_id: &PlayerId, x: f32) {
-    game_state
-        .players
-        .write()
-        .await
-        .get_mut(player_id)
-        .unwrap()
-        .position
-        .x = x;
-}
-
 async fn revision(game_state: &GameState, player_id: &PlayerId) -> u32 {
     game_state
         .player_trades
@@ -456,101 +445,4 @@ async fn duplicate_slots_merge_and_cannot_overflow() {
         assert_eq!(items[0].quantity, 2);
     }
     assert_eq!(bag_of(&pair.game_state, &pair.a).await[0].quantity, 10);
-}
-
-/// A stall trade is measured to the table: the owner may stand well behind
-/// it, and a customer far from the table cannot open it.
-#[tokio::test]
-async fn stall_trades_measure_range_to_the_table() {
-    let pair = make_trade_pair("trade_stall_range", 0, 0).await;
-    let stall = onlinerpg_shared::stall::Stall {
-        id: 77,
-        owner: pair.b,
-        position: Position {
-            x: 13.0,
-            y: 0.0,
-            z: 0.0,
-        },
-        rotation: 0.0,
-        floor_level: 0,
-    };
-    pair.game_state.stalls.write().await.insert(stall.id, stall);
-    move_x(&pair.game_state, &pair.b, 21.0).await;
-
-    move_x(&pair.game_state, &pair.a, 5.0).await;
-    pair.game_state
-        .request_player_trade_at_stall(&pair.a, 77)
-        .await;
-    assert!(
-        pair.game_state
-            .player_trades
-            .read()
-            .await
-            .get(&pair.a)
-            .is_none(),
-        "8 m from the table does not open"
-    );
-
-    move_x(&pair.game_state, &pair.a, 10.0).await;
-    pair.game_state
-        .request_player_trade_at_stall(&pair.a, 77)
-        .await;
-    assert!(
-        pair.game_state
-            .player_trades
-            .read()
-            .await
-            .get(&pair.a)
-            .is_some(),
-        "3 m from the table opens, even with the owner 11 m away"
-    );
-}
-
-/// Drifting off the table ends a stall trade like a cancel would, and the
-/// customer waits out the reopen cooldown either way.
-#[tokio::test]
-async fn walking_off_a_stall_trade_charges_the_reopen_cooldown() {
-    let pair = make_trade_pair("trade_stall_cooldown", 0, 0).await;
-    let stall = onlinerpg_shared::stall::Stall {
-        id: 78,
-        owner: pair.b,
-        position: Position {
-            x: 12.0,
-            y: 0.0,
-            z: 0.0,
-        },
-        rotation: 0.0,
-        floor_level: 0,
-    };
-    pair.game_state.stalls.write().await.insert(stall.id, stall);
-    pair.game_state
-        .request_player_trade_at_stall(&pair.a, 78)
-        .await;
-    let rev = revision(&pair.game_state, &pair.a).await;
-
-    move_x(&pair.game_state, &pair.a, 30.0).await;
-    pair.game_state
-        .confirm_player_trade(&pair.a, rev, &pair.auth)
-        .await;
-    assert!(pair
-        .game_state
-        .player_trades
-        .read()
-        .await
-        .get(&pair.a)
-        .is_none());
-
-    move_x(&pair.game_state, &pair.a, 10.0).await;
-    pair.game_state
-        .request_player_trade_at_stall(&pair.a, 78)
-        .await;
-    assert!(
-        pair.game_state
-            .player_trades
-            .read()
-            .await
-            .get(&pair.a)
-            .is_none(),
-        "the stall stays shut to the customer who walked off"
-    );
 }

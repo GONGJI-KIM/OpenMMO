@@ -1867,10 +1867,10 @@
     }
   }
 
-  /** The stall standing there is its owner's consent, so there is no request. */
+  /** Step up to the table; the server decides shop front or stall panel. */
   function tradeAtStall(intent: Extract<ClickIntent, { type: 'stall' }>) {
     approachAndAct({ position: intent.position, ...STALL_TRADE_APPROACH }, () =>
-      networkManager.sendPlayerTradeAtStall(intent.stallId)
+      networkManager.sendOpenStall(intent.stallId)
     )
   }
 

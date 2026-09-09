@@ -834,6 +834,7 @@ impl super::GameState {
                 self.use_coin_pouch(player_id, instance_id, &dice).await
             }
             UseEffect::ToggleTipHat => self.toggle_tip_hat(player_id).await,
+            UseEffect::ToggleStall => self.toggle_stall(player_id, instance_id).await,
             UseEffect::PromptCapeDye => {
                 self.prompt_cape_tool(
                     player_id,
@@ -1638,6 +1639,9 @@ impl super::GameState {
         if self
             .reject_if_trade_reserved(player_id, instance_id, "drop")
             .await
+            || self
+                .reject_if_holding_up_stall(player_id, instance_id, "drop")
+                .await
         {
             return;
         }

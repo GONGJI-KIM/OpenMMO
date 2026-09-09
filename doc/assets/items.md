@@ -140,3 +140,7 @@
       말 모델은 [MAXDESIGN-3D의 Horse, CC BY 4.0](animals.md), 규칙은 [MOUNTS.md](../MOUNTS.md).
 
 - 대물 물고기 5종(`trophy_*`)은 위 Fishing icons의 같은 어종 아이콘을 재사용한다. 새 이미지 생성 없음 (2026-09-09).
+- peddler_stall.png (Peddler's Stall 아이콘) — 새 에셋 없음. `client/public/models/objects/black_market_table.glb`를 그대로 렌더한 것이며, 원본 출처·라이선스는 [props.md](props.md)의 `black_market_table.glb` 항목을 따른다 (Meshy AI "Bottles and Scrolls", Pro 요금제, 2026-08-09 생성, 완전 소유권·상업 OK).
+    - 가방 아이콘과 땅에 펼쳐지는 탁자가 같은 모델이다 — 아이콘이 곧 설명이 된다. `items.csv`의 `worldModel`도 같은 GLB를 가리킨다.
+    - 아이콘 `client/public/items/objects/peddler_stall.png`: Cycles 128 samples, 투명 직교 렌더 512²→128² RGBA, Euler (-62°, 0°, 0°) — 카메라 쪽으로 눕혀 탁자 위의 물건이 판자가 아니라 상품으로 읽히게 하되, 롤은 주지 않아 가방 칸에서 수평으로 놓인다. 2026-09-09 생성.
+    - 재현 명령: `/Applications/Blender.app/Contents/MacOS/Blender -b -P tools/blender-scripts/render_peddler_stall_icon.py`

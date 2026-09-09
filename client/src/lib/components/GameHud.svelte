@@ -20,6 +20,7 @@
   import TradeOfferToast from './TradeOfferToast.svelte'
   import PartyInviteToast from './PartyInviteToast.svelte'
   import PlayerTradeWindow from './PlayerTradeWindow.svelte'
+  import StallWindow from './StallWindow.svelte'
   import PlayerTradeRequestToast from './PlayerTradeRequestToast.svelte'
   import PartySummonToast from './PartySummonToast.svelte'
   import PartyPanel from './PartyPanel.svelte'
@@ -210,6 +211,7 @@
     <TradeWindow />
     <EstateStorageWindow str={selectedCharacter.attributes.str} />
     <PlayerTradeWindow />
+    <StallWindow />
     <TradeOfferToast />
     <PartyInviteToast />
     <PlayerTradeRequestToast />

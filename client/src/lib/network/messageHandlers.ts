@@ -84,6 +84,7 @@ import { debuffPresentation } from '../data/debuffPresentation'
 import { campfireManager } from '../managers/campfireManager'
 import { stallManager } from '../managers/stallManager'
 import { tipHatManager } from '../managers/tipHatManager'
+import { openStall } from '../stores/stallStore'
 import { mealManager } from '../managers/mealManager'
 import { catchMessage } from './fishingMessages'
 import type { SkillId } from '../stores/skillsStore'
@@ -2119,6 +2120,15 @@ export function handleServerMessage(
 
     case 'StallRemoved':
       stallManager.remove(data.stall_id)
+      if (get(openStall)?.stall_id === data.stall_id) openStall.set(null)
+      break
+
+    case 'StallSignChanged':
+      stallManager.setSign(data.stall_id, data.sign)
+      break
+
+    case 'StallState':
+      openStall.set(data)
       break
 
     case 'TipHatPlaced':

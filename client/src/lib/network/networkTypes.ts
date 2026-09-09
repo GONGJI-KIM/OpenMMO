@@ -179,7 +179,18 @@ export type ClientMessage =
   | 'StartInstrument'
   | { InstrumentNotes: { events: InstrumentNoteWireEvent[] } }
   | { PlayerTradeRequest: { target_name: string } }
-  | { PlayerTradeAtStall: { stall_id: number } }
+  | { OpenStall: { stall_id: number } }
+  | { CloseStall: Record<string, never> }
+  | { SetStallSign: { sign: string } }
+  | {
+      ListStallItem: {
+        instance_id: number
+        quantity: number
+        unit_price: number
+      }
+    }
+  | { UnlistStallItem: { instance_id: number } }
+  | { BuyFromStall: { stall_id: number; lines: StallBuyLine[] } }
   | { PlayerTradeRespond: { requester_id: number; accept: boolean } }
   | {
       PlayerTradeSetOffer: {
@@ -440,6 +451,30 @@ export type ServerStall = {
   position: Position
   rotation: number
   floor_level: number
+  owner_name: string
+  /** Blank when the owner set none, is muted, or is blocked by the viewer. */
+  sign: string
+}
+
+export type StallListing = {
+  instance_id: number
+  item_def_id: string
+  quantity: number
+  enchant: number
+  unit_price: number
+}
+
+export type StallBuyLine = {
+  instance_id: number
+  quantity: number
+}
+
+export type StallState = {
+  stall_id: number
+  owner_name: string
+  sign: string
+  listings: StallListing[]
+  owned: boolean
 }
 
 export type ServerTipHat = {
