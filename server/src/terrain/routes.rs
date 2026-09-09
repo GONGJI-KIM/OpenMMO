@@ -614,9 +614,10 @@ async fn serve_vegetation(
     } else {
         serve_revalidated(path, headers).await?
     };
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, "public, no-cache".parse().unwrap());
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("public, no-cache"),
+    );
     Ok(response)
 }
 

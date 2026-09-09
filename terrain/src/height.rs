@@ -3,7 +3,7 @@ use crate::defaults::{self, VERTS_PER_SIDE};
 use crate::io::TerrainIO;
 use crate::tile_cache::{TileCache, TileCacheReadGuard, TILE_CACHE_CAPACITY};
 use onlinerpg_shared::worldgen::tile_bake::{HEIGHT_BIAS, HEIGHT_STEP};
-use std::collections::BTreeMap;
+use std::collections::{btree_map::Entry, BTreeMap};
 
 /// Tile size in world units (must match client TERRAIN_TILE_SIZE).
 const TILE_SIZE: f32 = defaults::TILE_DIM as f32;
@@ -161,9 +161,9 @@ pub async fn flatten_heightmap_rects(
         for tile_z in world_to_tile(expanded[1])..=world_to_tile(expanded[3]) {
             for tile_x in world_to_tile(expanded[0])..=world_to_tile(expanded[2]) {
                 let key = (tile_x, tile_z);
-                if !tiles.contains_key(&key) {
+                if let Entry::Vacant(entry) = tiles.entry(key) {
                     let raw = terrain.read_heightmap(tile_x, tile_z).await?;
-                    tiles.insert(key, (decode_heightmap(raw), false));
+                    entry.insert((decode_heightmap(raw), false));
                 }
 
                 let (heights, changed) = tiles.get_mut(&key).expect("tile inserted above");
@@ -197,16 +197,13 @@ pub async fn restore_heightmap_rects(
         for tile_z in world_to_tile(min_z)..=world_to_tile(max_z) {
             for tile_x in world_to_tile(min_x)..=world_to_tile(max_x) {
                 let key = (tile_x, tile_z);
-                if !tiles.contains_key(&key) {
+                if let Entry::Vacant(entry) = tiles.entry(key) {
                     let Some(original) = terrain.read_original_heightmap(tile_x, tile_z).await?
                     else {
                         continue;
                     };
                     let current = terrain.read_heightmap(tile_x, tile_z).await?;
-                    tiles.insert(
-                        key,
-                        (decode_heightmap(current), decode_heightmap(original), false),
-                    );
+                    entry.insert((decode_heightmap(current), decode_heightmap(original), false));
                 }
                 let Some((current, original, changed)) = tiles.get_mut(&key) else {
                     continue;
