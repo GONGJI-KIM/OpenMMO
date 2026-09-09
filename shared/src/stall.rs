@@ -39,7 +39,7 @@ pub const STALL_TAX_PERCENT: i64 = 5;
 
 /// Tax on a sale, rounded down; the seller keeps the rest.
 pub fn stall_tax(total: i64) -> i64 {
-    total * STALL_TAX_PERCENT / 100
+    total / 100 * STALL_TAX_PERCENT + total % 100 * STALL_TAX_PERCENT / 100
 }
 
 impl Stall {

@@ -1,8 +1,4 @@
-//! Stalls (doc/TRADE.md). An NPC merchant spreads one for free with
-//! `/lay_stall`; a player buys a `peddler_stall` from Rica and toggles it.
-//! A player's stall carries priced listings drawn from the owner's own bag —
-//! customers buy straight off the table, no negotiation. Never persisted: a
-//! stall exists only while its owner is online and standing by it.
+//! Temporary stalls sell reserved bag items while their owners stay nearby.
 
 use onlinerpg_shared::character::CharacterClass;
 use onlinerpg_shared::messages::StallBuyLine;
@@ -29,9 +25,7 @@ const BUSY: &str = "The stallholder is busy with someone else.";
 /// `Stall` so they never ride the AOI broadcast.
 pub(super) struct StallEntry {
     pub stall: Stall,
-    /// The bag instance that laid it out. Locked against listing and trading:
-    /// selling it would leave a table nothing can fold back up. Zero for the
-    /// NPC stalls, which are laid with no item at all.
+    /// Deployed bag instance, locked against transfers. Zero for NPC stalls.
     pub placed_with: u64,
     pub listings: Vec<StallListing>,
     /// Who has the panel open. All of them get the whole state on any change.
@@ -148,9 +142,7 @@ impl GameState {
         }
     }
 
-    /// Remove `player_id`'s stall if any, announcing it to the area. Also the
-    /// logout path, so it says nothing to the owner itself. Listed goods were
-    /// never taken out of the bag, so there is nothing to give back.
+    /// Remove the stall and notify the area. Unsold goods remain in the bag.
     pub(super) async fn remove_player_stall(&self, player_id: &PlayerId) -> bool {
         let Some(entry) = self.stalls.write().await.remove(player_id) else {
             return false;
@@ -178,9 +170,7 @@ impl GameState {
             .map(|entry| entry.stall.clone())
     }
 
-    /// Units of `instance_id` this player has priced up on their stall. The
-    /// soft reservation twin of `trade_reserved_quantity`: sell, drop, use,
-    /// equip and the trade table all subtract it from what they may touch.
+    /// Listed units reserved against other inventory actions.
     pub(super) async fn stall_reserved_quantity(
         &self,
         player_id: &PlayerId,
@@ -299,10 +289,19 @@ impl GameState {
         }
         {
             let mut stalls = self.stalls.write().await;
-            let Some(entry) = stalls.get_mut(&owner) else {
+            if !stalls
+                .get(&owner)
+                .is_some_and(|entry| entry.stall.id == stall_id)
+            {
                 return;
-            };
-            entry.viewers.insert(*player_id);
+            }
+            for (id, entry) in stalls.iter_mut() {
+                if *id == owner {
+                    entry.viewers.insert(*player_id);
+                } else {
+                    entry.viewers.remove(player_id);
+                }
+            }
         }
         self.push_stall_state(&owner, Some(player_id)).await;
     }
@@ -313,11 +312,6 @@ impl GameState {
         for entry in stalls.values_mut() {
             entry.viewers.remove(player_id);
         }
-    }
-
-    /// Drop a departing player out of every stall audience.
-    pub(super) async fn forget_stall_viewer(&self, player_id: &PlayerId) {
-        self.close_stall(player_id).await;
     }
 
     pub async fn set_stall_sign(&self, player_id: &PlayerId, sign: String) {
@@ -353,6 +347,9 @@ impl GameState {
                     .await;
                 return;
             };
+            if entry.stall.sign == sign {
+                return;
+            }
             entry.stall.sign = sign;
             entry.stall.clone()
         };
@@ -465,9 +462,7 @@ impl GameState {
         self.push_stall_state(player_id, None).await;
     }
 
-    /// Buy off a stall. Every line moves or none does, like the merchant's
-    /// `BuyItems`. The units come off the listings before the swap, so two
-    /// customers reaching for the same last three potions cannot both pass.
+    /// Reserve every cart line before settling the purchase atomically.
     pub async fn buy_from_stall(
         &self,
         player_id: &PlayerId,
@@ -477,6 +472,12 @@ impl GameState {
     ) {
         let lines: Vec<StallBuyLine> = lines.into_iter().filter(|l| l.quantity > 0).collect();
         if lines.is_empty() || lines.len() > STALL_MAX_LISTINGS {
+            return;
+        }
+        let mut seen = HashSet::new();
+        if lines.iter().any(|line| !seen.insert(line.instance_id)) {
+            self.send_system_message(player_id, "Choose each listing only once.")
+                .await;
             return;
         }
         let Some(owner) = self.owner_of_stall(stall_id).await else {
@@ -512,50 +513,48 @@ impl GameState {
             return;
         }
 
-        // Take every line off the table up front, or take none: a cart that
-        // half-succeeds is exactly what the merchant flow avoids.
         let taken = {
             let mut stalls = self.stalls.write().await;
-            match stalls.get_mut(&owner) {
-                None => None,
-                Some(entry) => {
-                    let all_available = lines.iter().all(|line| {
-                        entry
-                            .listing(line.instance_id)
-                            .is_some_and(|l| l.quantity >= line.quantity)
-                    });
-                    if !all_available {
-                        None
-                    } else {
-                        let sold: Vec<(StallListing, u32)> = lines
-                            .iter()
-                            .map(|line| {
-                                let listing = entry
-                                    .listings
-                                    .iter_mut()
-                                    .find(|l| l.instance_id == line.instance_id)
-                                    .expect("checked above");
-                                listing.quantity -= line.quantity;
-                                (listing.clone(), line.quantity)
-                            })
-                            .collect();
-                        entry.listings.retain(|l| l.quantity > 0);
-                        Some(sold)
+            (|| {
+                let entry = stalls
+                    .get_mut(&owner)
+                    .filter(|entry| entry.stall.id == stall_id)
+                    .ok_or("That stall is gone.")?;
+                let mut sold = Vec::with_capacity(lines.len());
+                let mut total = 0_i64;
+                for line in &lines {
+                    let listing = entry
+                        .listing(line.instance_id)
+                        .filter(|listing| listing.quantity >= line.quantity)
+                        .ok_or("That's already sold.")?;
+                    total = listing
+                        .unit_price
+                        .checked_mul(i64::from(line.quantity))
+                        .and_then(|price| total.checked_add(price))
+                        .ok_or("That purchase costs too much.")?;
+                    sold.push((listing.clone(), line.quantity));
+                }
+                for listing in &mut entry.listings {
+                    if let Some(line) = lines
+                        .iter()
+                        .find(|line| line.instance_id == listing.instance_id)
+                    {
+                        listing.quantity -= line.quantity;
                     }
                 }
+                entry.listings.retain(|listing| listing.quantity > 0);
+                Ok::<_, &str>((sold, total))
+            })()
+        };
+        let (sold, total) = match taken {
+            Ok(taken) => taken,
+            Err(reason) => {
+                self.send_system_message(player_id, reason).await;
+                self.push_stall_state(&owner, None).await;
+                return;
             }
         };
-        let Some(sold) = taken else {
-            self.send_system_message(player_id, "That's already sold.")
-                .await;
-            self.push_stall_state(&owner, None).await;
-            return;
-        };
 
-        let total: i64 = sold
-            .iter()
-            .map(|(listing, qty)| listing.unit_price.saturating_mul(*qty as i64))
-            .sum();
         let tax = stall_tax(total);
         if let Err(reason) = self
             .settle_stall_sale(player_id, &owner, &sold, total, tax, auth)
@@ -584,9 +583,7 @@ impl GameState {
         self.push_stall_state(&owner, None).await;
     }
 
-    /// Move the goods and the coin in one pass, then persist both sides. The
-    /// shape follows `execute_trade`: revalidate under the locks, swap, commit,
-    /// and leave a missed commit to the periodic flush.
+    /// Revalidate, swap and persist both sides under the persistence lock.
     async fn settle_stall_sale(
         &self,
         buyer: &PlayerId,
@@ -639,19 +636,29 @@ impl GameState {
             if buyer_gold_before < total {
                 break 'swap Err("You can't afford that.");
             }
-            let still_there = sold.iter().all(|(listing, qty)| {
-                inventories.get(seller).is_some_and(|inv| {
-                    inv.bag.iter().any(|item| {
-                        item.instance_id == listing.instance_id
-                            && item.item_def_id == listing.item_def_id
-                            && item.enchant == listing.enchant
-                            && item.quantity >= *qty
-                    })
+            let buyer_gold_after = buyer_gold_before - total;
+            let Some(seller_gold_after) = seller_gold_before.checked_add(total - tax) else {
+                break 'swap Err("The stallholder can't hold that much gold.");
+            };
+            let items: Option<Vec<_>> = sold
+                .iter()
+                .map(|(listing, qty)| {
+                    inventories
+                        .get(seller)?
+                        .bag
+                        .iter()
+                        .find(|item| {
+                            item.instance_id == listing.instance_id
+                                && item.item_def_id == listing.item_def_id
+                                && item.enchant == listing.enchant
+                                && item.quantity >= *qty
+                        })
+                        .cloned()
                 })
-            });
-            if !still_there {
+                .collect();
+            let Some(items) = items else {
                 break 'swap Err("The stallholder no longer has that.");
-            }
+            };
             let Some(buyer_inv) = inventories.get(buyer) else {
                 break 'swap Err("The sale could not be completed.");
             };
@@ -660,7 +667,7 @@ impl GameState {
             }
 
             let mut next_id = reserved_ids;
-            for (listing, qty) in sold {
+            for ((listing, qty), item) in sold.iter().zip(items) {
                 let taken = inventories
                     .get_mut(seller)
                     .is_some_and(|inv| take_from_bag(inv, listing.instance_id, *qty));
@@ -679,16 +686,14 @@ impl GameState {
                             stackable: self.item_defs.stackable(&listing.item_def_id),
                             item_def_id: &listing.item_def_id,
                             enchant: listing.enchant,
-                            cape_color: None,
-                            cape_texture: None,
+                            cape_color: item.cape_color,
+                            cape_texture: item.cape_texture,
                             first_instance_id: next_id,
                             quantity: *qty,
                         },
                     );
                 }
             }
-            let buyer_gold_after = buyer_gold_before - total;
-            let seller_gold_after = seller_gold_before + total - tax;
             gold.insert(*buyer, buyer_gold_after);
             gold.insert(*seller, seller_gold_after);
             Ok((
@@ -707,13 +712,7 @@ impl GameState {
             seller_gold_after,
             buyer_rows,
             seller_rows,
-        ) = match outcome {
-            Ok(values) => values,
-            Err(reason) => {
-                drop(persistence);
-                return Err(reason);
-            }
-        };
+        ) = outcome?;
 
         let save_data = {
             let players = self.players.read().await;
@@ -819,11 +818,7 @@ impl GameState {
         tax: i64,
     ) {
         let describe = |listing: &StallListing, qty: u32| -> String {
-            let name = self
-                .item_defs
-                .get(&listing.item_def_id)
-                .map(|def| def.name.clone())
-                .unwrap_or_else(|| listing.item_def_id.clone());
+            let name = self.item_name(&listing.item_def_id);
             let name = if listing.enchant != 0 {
                 format!("+{} {name}", listing.enchant)
             } else {
@@ -889,9 +884,7 @@ impl GameState {
             .map(|entry| entry.stall.owner)
     }
 
-    /// The stall still stands, its owner is online, and the customer is at the
-    /// table. Range is measured to the table, not to the owner — the customer
-    /// stands in front and the owner moves about behind.
+    /// Check that the owner is online and the customer is within table range.
     async fn customer_at_stall(&self, customer: &PlayerId, owner: &PlayerId) -> bool {
         let table = self
             .stalls
@@ -912,9 +905,7 @@ impl GameState {
         })
     }
 
-    /// Push the whole listing state to everyone watching. Whole state rather
-    /// than deltas: a panel that drifts is what makes a customer click for
-    /// goods somebody else already took.
+    /// Send a listing snapshot to one viewer or the whole audience.
     async fn push_stall_state(&self, owner: &PlayerId, only: Option<&PlayerId>) {
         let Some((stall, listings, viewers)) = ({
             let stalls = self.stalls.read().await;

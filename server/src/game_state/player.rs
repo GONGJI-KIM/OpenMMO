@@ -1009,7 +1009,7 @@ impl super::GameState {
         self.music_performances.write().await.remove(player_id);
         self.remove_live_instrument(player_id).await;
         self.remove_player_stall(player_id).await;
-        self.forget_stall_viewer(player_id).await;
+        self.close_stall(player_id).await;
         self.remove_player_tip_hat(player_id).await;
         self.drop_player_trade(player_id, "They left.").await;
         self.last_player_attacks.write().await.remove(player_id);

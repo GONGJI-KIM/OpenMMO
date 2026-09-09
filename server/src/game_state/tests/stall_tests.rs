@@ -402,3 +402,211 @@ async fn a_multi_line_cart_moves_together_and_is_taxed_once() {
         2
     );
 }
+
+#[tokio::test]
+async fn regression_duplicate_cart_lines_cannot_exceed_listed_quantity() {
+    let market = make_market("regression_duplicate", 0, 1_000).await;
+    let g = &market.game_state;
+    give(g, &market.owner, bag_item(1, "peddler_stall", 1)).await;
+    give(g, &market.owner, bag_item(2, "apple", 4)).await;
+    g.use_item(&market.owner, 1).await;
+    g.list_stall_item(&market.owner, 2, 2, 10).await;
+    let id = stall_id(g, &market.owner).await;
+    g.buy_from_stall(
+        &market.customer,
+        id,
+        vec![
+            StallBuyLine {
+                instance_id: 2,
+                quantity: 2,
+            },
+            StallBuyLine {
+                instance_id: 2,
+                quantity: 2,
+            },
+        ],
+        &market.auth,
+    )
+    .await;
+    assert_eq!(g.get_player_gold(&market.customer).await, 1_000);
+    assert_eq!(g.get_player_gold(&market.owner).await, 0);
+    assert_eq!(g.stalls.read().await[&market.owner].listings[0].quantity, 2);
+    let inventories = g.inventories.read().await;
+    assert!(inventories[&market.customer].bag.is_empty());
+    assert_eq!(inventories[&market.owner].bag[1].quantity, 4);
+}
+
+#[tokio::test]
+async fn regression_large_price_is_rejected_without_overflow() {
+    let market = make_market("regression_overflow", 0, 1_000).await;
+    let g = &market.game_state;
+    give(g, &market.owner, bag_item(1, "peddler_stall", 1)).await;
+    give(g, &market.owner, bag_item(2, "apple", 1)).await;
+    g.use_item(&market.owner, 1).await;
+    g.list_stall_item(&market.owner, 2, 1, i64::MAX).await;
+    let id = stall_id(g, &market.owner).await;
+    g.buy_from_stall(&market.customer, id, buy(2, 1), &market.auth)
+        .await;
+    assert_eq!(g.get_player_gold(&market.customer).await, 1_000);
+}
+
+#[tokio::test]
+async fn regression_sale_preserves_cape_customization() {
+    let market = make_market("regression_cape", 0, 1_000).await;
+    let g = &market.game_state;
+    give(g, &market.owner, bag_item(1, "peddler_stall", 1)).await;
+    let mut cape = bag_item(2, "wool_cape", 1);
+    cape.cape_color = Some("#3355ff".to_string());
+    cape.cape_texture = Some("a".repeat(64));
+    give(g, &market.owner, cape).await;
+    g.use_item(&market.owner, 1).await;
+    g.list_stall_item(&market.owner, 2, 1, 10).await;
+    let id = stall_id(g, &market.owner).await;
+    g.buy_from_stall(&market.customer, id, buy(2, 1), &market.auth)
+        .await;
+    let inventories = g.inventories.read().await;
+    assert_eq!(
+        inventories[&market.customer].bag[0].cape_color.as_deref(),
+        Some("#3355ff")
+    );
+    assert_eq!(
+        inventories[&market.customer].bag[0].cape_texture,
+        Some("a".repeat(64))
+    );
+}
+
+#[tokio::test]
+async fn regression_opening_another_stall_replaces_subscription() {
+    let market = make_market("regression_viewers", 0, 1_000).await;
+    let g = &market.game_state;
+    give(g, &market.owner, bag_item(1, "peddler_stall", 1)).await;
+    give(g, &market.customer, bag_item(2, "peddler_stall", 1)).await;
+    g.use_item(&market.owner, 1).await;
+    g.use_item(&market.customer, 2).await;
+    let first = stall_id(g, &market.owner).await;
+    let second = stall_id(g, &market.customer).await;
+    g.open_stall(&market.customer, first).await;
+    g.open_stall(&market.customer, second).await;
+    assert!(!g.stalls.read().await[&market.owner]
+        .viewers
+        .contains(&market.customer));
+    assert!(g.stalls.read().await[&market.customer]
+        .viewers
+        .contains(&market.customer));
+    g.open_stall(&market.customer, u64::MAX).await;
+    assert!(g.stalls.read().await[&market.customer]
+        .viewers
+        .contains(&market.customer));
+    g.close_stall(&market.customer).await;
+    assert!(g
+        .stalls
+        .read()
+        .await
+        .values()
+        .all(|entry| !entry.viewers.contains(&market.customer)));
+}
+
+#[tokio::test]
+async fn overflowing_cart_totals_leave_inventory_gold_and_listings_unchanged() {
+    for (name, quantity, two_lines) in [
+        ("stall_mul_overflow", 2, false),
+        ("stall_sum_overflow", 1, true),
+    ] {
+        let market = make_market(name, 0, i64::MAX).await;
+        let g = &market.game_state;
+        give(g, &market.owner, bag_item(1, "peddler_stall", 1)).await;
+        give(g, &market.owner, bag_item(2, "apple", quantity)).await;
+        g.use_item(&market.owner, 1).await;
+        g.list_stall_item(&market.owner, 2, quantity, i64::MAX)
+            .await;
+        let mut lines = buy(2, quantity);
+        if two_lines {
+            give(g, &market.owner, bag_item(3, "bread", 1)).await;
+            g.list_stall_item(&market.owner, 3, 1, i64::MAX).await;
+            lines.push(StallBuyLine {
+                instance_id: 3,
+                quantity: 1,
+            });
+        }
+        let id = stall_id(g, &market.owner).await;
+        g.buy_from_stall(&market.customer, id, lines, &market.auth)
+            .await;
+        assert_eq!(g.get_player_gold(&market.customer).await, i64::MAX);
+        assert_eq!(g.get_player_gold(&market.owner).await, 0);
+        let inventories = g.inventories.read().await;
+        assert!(inventories[&market.customer].bag.is_empty());
+        assert_eq!(inventories[&market.owner].bag[1].quantity, quantity);
+        drop(inventories);
+        let stalls = g.stalls.read().await;
+        assert_eq!(
+            stalls[&market.owner].listings.len(),
+            if two_lines { 2 } else { 1 }
+        );
+        assert_eq!(stalls[&market.owner].listings[0].quantity, quantity);
+    }
+}
+
+#[tokio::test]
+async fn seller_wallet_overflow_rolls_back_every_cart_line() {
+    let market = make_market("stall_wallet_overflow", i64::MAX, 1_000).await;
+    let g = &market.game_state;
+    give(g, &market.owner, bag_item(1, "peddler_stall", 1)).await;
+    give(g, &market.owner, bag_item(2, "apple", 3)).await;
+    give(g, &market.owner, bag_item(3, "bread", 2)).await;
+    g.use_item(&market.owner, 1).await;
+    g.list_stall_item(&market.owner, 2, 3, 100).await;
+    g.list_stall_item(&market.owner, 3, 2, 100).await;
+    let id = stall_id(g, &market.owner).await;
+    g.buy_from_stall(
+        &market.customer,
+        id,
+        vec![
+            StallBuyLine {
+                instance_id: 2,
+                quantity: 1,
+            },
+            StallBuyLine {
+                instance_id: 3,
+                quantity: 2,
+            },
+        ],
+        &market.auth,
+    )
+    .await;
+    assert_eq!(g.get_player_gold(&market.customer).await, 1_000);
+    assert_eq!(g.get_player_gold(&market.owner).await, i64::MAX);
+    let inventories = g.inventories.read().await;
+    assert!(inventories[&market.customer].bag.is_empty());
+    assert_eq!(inventories[&market.owner].bag[1].quantity, 3);
+    assert_eq!(inventories[&market.owner].bag[2].quantity, 2);
+    drop(inventories);
+    let stalls = g.stalls.read().await;
+    assert_eq!(stalls[&market.owner].listings.len(), 2);
+    assert_eq!(stalls[&market.owner].listings[0].quantity, 3);
+    assert_eq!(stalls[&market.owner].listings[1].quantity, 2);
+}
+
+#[tokio::test]
+async fn maximum_prices_and_wallets_settle_without_intermediate_overflow() {
+    for (name, owner_gold, price, expected_owner_gold) in [
+        ("stall_max_price", 0, i64::MAX, 8_762_203_435_012_037_017),
+        ("stall_max_wallet", i64::MAX - 95, 100, i64::MAX),
+    ] {
+        let market = make_market(name, owner_gold, price).await;
+        let g = &market.game_state;
+        give(g, &market.owner, bag_item(1, "peddler_stall", 1)).await;
+        give(g, &market.owner, bag_item(2, "apple", 1)).await;
+        g.use_item(&market.owner, 1).await;
+        g.list_stall_item(&market.owner, 2, 1, price).await;
+        let id = stall_id(g, &market.owner).await;
+        g.buy_from_stall(&market.customer, id, buy(2, 1), &market.auth)
+            .await;
+        assert_eq!(g.get_player_gold(&market.customer).await, 0);
+        assert_eq!(g.get_player_gold(&market.owner).await, expected_owner_gold);
+        assert_eq!(
+            g.inventories.read().await[&market.customer].bag[0].quantity,
+            1
+        );
+        assert!(g.stalls.read().await[&market.owner].listings.is_empty());
+    }
+}

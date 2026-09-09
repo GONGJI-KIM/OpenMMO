@@ -862,7 +862,7 @@ class NetworkManager {
   }
 
   sendCloseStall() {
-    this.sendMessage({ CloseStall: {} })
+    this.sendMessage('CloseStall')
   }
 
   sendSetStallSign(sign: string) {

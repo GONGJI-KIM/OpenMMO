@@ -23,10 +23,8 @@
     sortBag($inventoryStore.bag).filter((item) => !listed.has(item.instance_id))
   )
 
-  /** The owner's half-written listing: quantity and price before it goes out. */
   let draft = $state<{ item: ItemInstance; quantity: number } | null>(null)
   let priceText = $state('')
-  /** Customer cart, mirroring the merchant shop: click to add, Confirm to buy. */
   let cart = $state<CartLine[]>([])
   let pendingAdd = $state<StallListing | null>(null)
   let signText = $state('')
@@ -49,8 +47,7 @@
     return mountOverlay('stall', closeStallPanel)
   })
 
-  // A listing the owner takes back, or a stack somebody else bought out from
-  // under the cart, must not leave stale lines behind.
+  // Remove sold-out or withdrawn listings from the cart.
   $effect(() => {
     if (pendingAdd && !listed.has(pendingAdd.instance_id)) pendingAdd = null
     if (cart.some((line) => !listed.has(line.listing.instance_id))) {
@@ -71,11 +68,10 @@
   )
   const canConfirm = $derived(cart.length > 0 && cartTotal <= $playerGold)
 
-  /** Units already in the cart, so a second click cannot oversell a listing. */
   function inCart(instanceId: number): number {
-    return cart
-      .filter((line) => line.listing.instance_id === instanceId)
-      .reduce((sum, line) => sum + line.qty, 0)
+    return (
+      cart.find((line) => line.listing.instance_id === instanceId)?.qty ?? 0
+    )
   }
 
   const addMax = $derived(
@@ -86,9 +82,7 @@
           Math.min(
             pendingAdd.quantity - inCart(pendingAdd.instance_id),
             pendingAdd.unit_price > 0
-              ? Math.floor(
-                  ($playerGold - cartTotal) / Math.max(1, pendingAdd.unit_price)
-                )
+              ? Math.floor(($playerGold - cartTotal) / pendingAdd.unit_price)
               : pendingAdd.quantity
           )
         )
@@ -148,7 +142,6 @@
     pendingAdd = null
   }
 
-  /** Click a cart line to take one unit back off it, like the shop cart. */
   function removeOne(line: CartLine) {
     if (line.qty > 1) line.qty -= 1
     else cart = cart.filter((entry) => entry !== line)
@@ -171,7 +164,6 @@
     networkManager.sendSetStallSign(signText.trim())
   }
 
-  // Without a sign the owner names the stall, so the header never repeats it.
   const title = $derived(
     !stall ? '' : stall.sign || `${stall.owner_name}'s stall`
   )

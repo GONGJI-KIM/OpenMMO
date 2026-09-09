@@ -180,7 +180,7 @@ export type ClientMessage =
   | { InstrumentNotes: { events: InstrumentNoteWireEvent[] } }
   | { PlayerTradeRequest: { target_name: string } }
   | { OpenStall: { stall_id: number } }
-  | { CloseStall: Record<string, never> }
+  | 'CloseStall'
   | { SetStallSign: { sign: string } }
   | {
       ListStallItem: {
