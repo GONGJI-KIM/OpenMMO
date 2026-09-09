@@ -10,8 +10,12 @@ fn mounted_movement_waits_for_turning_before_the_next_leg() {
     me.mounted = true;
     s.self_player = Some(me);
     assert_eq!(s.mount_turn_delay_ms(0.0), 0);
-    assert!((770..=771).contains(&s.mount_turn_delay_ms(std::f32::consts::FRAC_PI_2)));
-    assert!((1340..=1341).contains(&s.mount_turn_delay_ms(std::f32::consts::PI)));
+    assert_eq!(s.mount_turn_delay_ms(std::f32::consts::FRAC_PI_2), 714);
+    assert_eq!(s.mount_turn_delay_ms(std::f32::consts::PI), 1227);
+
+    s.self_move_mult = 0.5;
+    assert_eq!(s.mount_turn_delay_ms(std::f32::consts::FRAC_PI_2), 827);
+    assert_eq!(s.mount_turn_delay_ms(std::f32::consts::PI), 1454);
 }
 
 /// A state with one of everything a `move` target can name, so the ladder

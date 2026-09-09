@@ -18,6 +18,8 @@
 
 mod action;
 mod combat;
+#[cfg(test)]
+mod combat_timing_tests;
 mod execute;
 mod movement;
 mod outcome;
@@ -443,7 +445,7 @@ pub async fn llm_driver(
         }
     }
 
-    let attack_cooldown = load_attack_cooldown();
+    state.lock().await.attack_cooldown = load_attack_cooldown();
 
     // Stagger idle polls: random offset so NPCs don't all poll at the same time
     let idle_stagger = {
@@ -453,7 +455,6 @@ pub async fn llm_driver(
     };
     let mut last_prompt_at = Instant::now() - idle_stagger;
     let mut attack_target: Option<(String, Option<bool>)> = None;
-    let mut last_attack_at = Instant::now() - attack_cooldown;
     let mut llm_in_flight: Option<tokio::task::JoinHandle<anyhow::Result<String>>> = None;
     let mut prompt_pending_since: Option<Instant> = None;
     // Track last chat/combat activity to decide polling interval
@@ -636,9 +637,8 @@ pub async fn llm_driver(
             }
         }
 
-        // Tick interval: ATTACK_COOLDOWN when in combat, otherwise 1s (responsive to events)
         let tick_duration = if attack_target.is_some() {
-            attack_cooldown.saturating_sub(last_attack_at.elapsed())
+            state.lock().await.player_attack_wait()
         } else {
             Duration::from_secs(1)
         };
@@ -684,11 +684,9 @@ pub async fn llm_driver(
 
         // === Combat tick ===
         if let Some((monster_id, sprint)) = attack_target.clone() {
-            if last_attack_at.elapsed() >= attack_cooldown {
-                if !tick_combat(&state, &monster_id, sprint).await {
-                    attack_target = None;
-                }
-                last_attack_at = Instant::now();
+            let attack_ready = state.lock().await.player_attack_wait().is_zero();
+            if attack_ready && !tick_combat(&state, &monster_id, sprint).await {
+                attack_target = None;
             }
         }
 

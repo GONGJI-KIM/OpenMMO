@@ -11,6 +11,13 @@ pub struct ActionProgress {
 }
 
 impl SharedState {
+    pub fn player_attack_wait(&self) -> std::time::Duration {
+        self.last_player_attack_at
+            .map_or(std::time::Duration::ZERO, |last| {
+                self.attack_cooldown.saturating_sub(last.elapsed())
+            })
+    }
+
     pub async fn send_command(&mut self, msg: ClientMessage) -> anyhow::Result<()> {
         self.dispatch_command(msg, true).await
     }
@@ -37,6 +44,11 @@ impl SharedState {
         msg: ClientMessage,
         from_action: bool,
     ) -> anyhow::Result<()> {
+        let player_attack = matches!(&msg, ClientMessage::PlayerAttack { .. });
+        if player_attack && !self.player_attack_wait().is_zero() {
+            // The combat loop retries the latest target after the cooldown.
+            return Ok(());
+        }
         let msg = match msg {
             ClientMessage::PlayerMove {
                 position,
@@ -132,6 +144,9 @@ impl SharedState {
             .send(msg)
             .await
             .map_err(|e| anyhow::anyhow!("Command channel closed: {e}"))?;
+        if player_attack {
+            self.last_player_attack_at = Some(tokio::time::Instant::now());
+        }
         if from_action {
             self.action_commands_sent += 1;
         }
