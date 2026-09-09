@@ -186,34 +186,29 @@
   let fadeTimer: number | undefined
 
   let scrollFrame: number | undefined
-  let followNewMessages = true
   let scrollTab: Tab = 'all'
 
-  function updateMessageScrollPreference() {
-    if (chatContainer) followNewMessages = isChatAtBottom(chatContainer)
-  }
-
-  // Coalesce scrolling into one layout read per frame.
-  $effect(() => {
+  // Measure before new rows change the scroll height.
+  $effect.pre(() => {
     if (collapsed) return
     const tabChanged = scrollTab !== activeTab
     scrollTab = activeTab
-    const len =
+    const messages =
       activeTab === 'all'
-        ? chatMessages.length
+        ? chatMessages
         : activeTab === 'party'
-          ? partyMessages.length
-          : combatMessages.length
+          ? partyMessages
+          : combatMessages
     if (
       !chatContainer ||
-      !len ||
-      (!tabChanged && !followNewMessages) ||
-      scrollFrame !== undefined
+      messages.length === 0 ||
+      scrollFrame !== undefined ||
+      (!tabChanged && !isChatAtBottom(chatContainer))
     )
       return
     scrollFrame = requestAnimationFrame(() => {
       scrollFrame = undefined
-      if (!collapsed && chatContainer && (tabChanged || followNewMessages)) {
+      if (!collapsed && chatContainer) {
         chatContainer.scrollTop = chatContainer.scrollHeight
       }
     })
@@ -252,7 +247,6 @@
   }
 
   function expandChat(focusInput = false) {
-    followNewMessages = true
     collapsed = false
     transcriptVisible = true
     seenCollapsedChatId = chatMessages.at(-1)?.id ?? 0
@@ -512,12 +506,7 @@
       </div>
     {/snippet}
 
-    <div
-      class="chat-messages"
-      bind:this={chatContainer}
-      role="log"
-      onscroll={updateMessageScrollPreference}
-    >
+    <div class="chat-messages" bind:this={chatContainer} role="log">
       {#if activeTab === 'all'}
         {#each chatMessages as entry (entry.id)}
           {@render chatRow(entry)}
