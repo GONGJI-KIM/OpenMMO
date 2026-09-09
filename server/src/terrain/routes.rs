@@ -1,7 +1,7 @@
 use axum::{
     body::Bytes,
     extract::{DefaultBodyLimit, Path, Query, State},
-    http::{header, StatusCode},
+    http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
     Json, Router,
@@ -616,7 +616,7 @@ async fn serve_vegetation(
     };
     response.headers_mut().insert(
         header::CACHE_CONTROL,
-        axum::http::HeaderValue::from_static("public, no-cache"),
+        HeaderValue::from_static("public, no-cache"),
     );
     Ok(response)
 }

@@ -5,15 +5,15 @@
 //! `LATENCY_GRACE_MS` of slack.
 
 use onlinerpg_shared::fishing::{
-    fish_pull_ps, reel_speed_mps, stamina_drain_ps, stamina_max, FishState, FishingAction,
-    FishingOutcome, BITE_WINDOW_MS, CAST_MS, CATCH_SLACK_M, CATCH_XP_PER_RARITY_SQ, ESCAPE_XP,
-    EXHAUSTED_STEER_PER_TICK, FIGHT_TIMEOUT_MS, FISH_WANDER_RADIUS_M, FLOTSAM_SHARE_PCT,
+    bonus_fish_chance, fish_pull_ps, reel_speed_mps, stamina_drain_ps, stamina_max, FishState,
+    FishingAction, FishingOutcome, BITE_WINDOW_MS, CAST_MS, CATCH_SLACK_M, CATCH_XP_PER_RARITY_SQ,
+    ESCAPE_XP, EXHAUSTED_STEER_PER_TICK, FIGHT_TIMEOUT_MS, FISH_WANDER_RADIUS_M, FLOTSAM_SHARE_PCT,
     GIVE_LINE_EXTRA_MPS, LATENCY_GRACE_MS, MAX_CAST_DISTANCE_METERS, MIN_FISHABLE_DEPTH_M,
     MIN_FISH_DISTANCE_M, PANIC_BAND_M, RARITY_SKILL_BONUS_PCT, REST_MAX_MS, REST_MIN_MS,
     RUN_MAX_MS, RUN_MAX_PER_RARITY_MS, RUN_MIN_MS, RUN_SPEED_BASE_MPS, RUN_SPEED_PER_RARITY_MPS,
-    SHORE_SAMPLE_STEP_M, STAMINA_DRAIN_MIN_TENSION, STAMINA_RECOVER_PS, TENSION_GIVE_RELIEF_PS,
-    TENSION_INITIAL, TENSION_MAX, TENSION_REEL_PS, TENSION_REST_DECAY_PS, WAIT_MAX_MS, WAIT_MIN_MS,
-    WATERLINE_MARGIN_M,
+    SHORE_SAMPLE_STEP_M, STAMINA_DRAIN_MIN_TENSION, STAMINA_RECOVER_PS, TENSION_BOLD,
+    TENSION_GIVE_RELIEF_PS, TENSION_INITIAL, TENSION_MAX, TENSION_REEL_PS, TENSION_REST_DECAY_PS,
+    WAIT_MAX_MS, WAIT_MIN_MS, WATERLINE_MARGIN_M,
 };
 use onlinerpg_shared::inventory::EquipSlot;
 use onlinerpg_shared::skills::SkillId;
@@ -55,6 +55,10 @@ pub(crate) struct FightState {
     /// Time left in the current Running/Resting burst.
     pub state_ms_left: f32,
     pub tension: f32,
+    /// Time the fish has spent Running, and how much of it at or above
+    /// `TENSION_BOLD`; their ratio is the bonus-fish chance.
+    pub run_ms: f32,
+    pub bold_run_ms: f32,
     /// Remaining stamina; the pool size is `stamina_max(rarity)`.
     pub stamina: f32,
     /// Angler-to-fish line length (XZ meters).
@@ -66,6 +70,21 @@ pub(crate) struct FightState {
     pub dir_x: f32,
     pub dir_z: f32,
     pub elapsed_ms: f32,
+}
+
+impl FightState {
+    #[cfg(test)]
+    pub fn bold_share(&self) -> f32 {
+        onlinerpg_shared::fishing::bold_share(self.bold_run_ms, self.run_ms)
+    }
+
+    pub fn bonus_chance(&self) -> f32 {
+        bonus_fish_chance(self.bold_run_ms, self.run_ms)
+    }
+
+    pub fn bonus_chance_pct(&self) -> u32 {
+        (self.bonus_chance() * 100.0).round() as u32
+    }
 }
 
 /// Randomness for one behavior flip, drawn lazily (most ticks don't flip)
@@ -146,6 +165,12 @@ pub(crate) fn step_fight(
         _ => {}
     }
     f.tension = (f.tension + tension_ps * dt).max(0.0);
+    if f.fish_state == FishState::Running {
+        f.run_ms += dt * 1000.0;
+        if f.tension >= TENSION_BOLD {
+            f.bold_run_ms += dt * 1000.0;
+        }
+    }
     if f.tension >= TENSION_MAX {
         return Some(FightOutcome::Snapped);
     }
@@ -757,7 +782,7 @@ impl GameState {
             // Boxed: the message dwarfs the other two variants, and this
             // vector holds one entry per fight in flight.
             Beat(Position, Box<ServerMessage>),
-            Landed,
+            Landed { bonus: bool },
             Escaped,
         }
         let mut results: Vec<(PlayerId, u64, After)> = Vec::with_capacity(fights.len());
@@ -803,9 +828,12 @@ impl GameState {
                             tension_pct: state.tension.round() as u32,
                             stamina_pct: (state.stamina / stamina_max(rarity) * 100.0).round()
                                 as u32,
+                            bonus_chance_pct: state.bonus_chance_pct(),
                         }),
                     ),
-                    Some(FightOutcome::Landed) => After::Landed,
+                    Some(FightOutcome::Landed) => After::Landed {
+                        bonus: self.bonus_roll(&mut rng) < state.bonus_chance(),
+                    },
                     Some(FightOutcome::Snapped | FightOutcome::ThrewHook) => After::Escaped,
                 };
                 results.push((player_id, sid, after));
@@ -814,13 +842,25 @@ impl GameState {
         for (player_id, sid, after) in results {
             match after {
                 After::Beat(bobber, msg) => self.broadcast_fishing(&bobber, *msg).await,
-                After::Landed => self.finish_fishing_caught(&player_id, sid, auth).await,
+                After::Landed { bonus } => {
+                    self.finish_fishing_caught(&player_id, sid, bonus, auth)
+                        .await
+                }
                 After::Escaped => {
                     self.end_fishing_if(&player_id, Some(sid), FishingOutcome::Escaped, ESCAPE_XP)
                         .await;
                 }
             }
         }
+    }
+
+    /// The bonus-fish roll, pinned by tests via `fishing_bonus_roll`.
+    fn bonus_roll(&self, rng: &mut impl Rng) -> f32 {
+        #[cfg(test)]
+        if let Some(forced) = *self.fishing_bonus_roll.lock().unwrap() {
+            return forced;
+        }
+        rng.gen::<f32>()
     }
 
     /// Roll species + size + trophy for a bite, from the item-def catch
@@ -892,6 +932,8 @@ impl GameState {
                     fish_state: FishState::Running,
                     state_ms_left: rolls.next_run_ms,
                     tension: TENSION_INITIAL,
+                    run_ms: 0.0,
+                    bold_run_ms: 0.0,
                     stamina: stamina_max(rarity),
                     distance: len.max(session.reel_floor_m),
                     min_distance: session.reel_floor_m,
@@ -911,6 +953,7 @@ impl GameState {
                 fish_state: FishState::Running,
                 tension_pct: TENSION_INITIAL.round() as u32,
                 stamina_pct: 100,
+                bonus_chance_pct: 0,
             },
         )
         .await;
@@ -919,11 +962,13 @@ impl GameState {
     /// The fish was reeled in exhausted: award it (bag, or ground when
     /// overweight), grant skill XP, end the session with the full catch
     /// details. `sid` guards against a session cancelled and re-cast between
-    /// the tick's scan and this call.
-    async fn finish_fishing_caught(
+    /// the tick's scan and this call. `bonus` is the bonus-chance roll's verdict;
+    /// it only ever doubles a fish — junk and coin pouches (rarity 0) never.
+    pub(super) async fn finish_fishing_caught(
         &self,
         player_id: &PlayerId,
         sid: u64,
+        bonus: bool,
         auth: Option<&crate::auth::AuthService>,
     ) {
         let Some(fish) = ({
@@ -943,6 +988,10 @@ impl GameState {
         // (`use_item`) for its copper. Junk is rarityTier 0, so the XP
         // formula below grants nothing for it naturally.
         self.award_item(player_id, &fish.item_def_id).await;
+        let bonus_fish = bonus && fish.rarity > 0;
+        if bonus_fish {
+            self.award_item(player_id, &fish.item_def_id).await;
+        }
         self.grant_fishing_catch_title(player_id, &fish.item_def_id, auth)
             .await;
         let xp = CATCH_XP_PER_RARITY_SQ * u64::from(fish.rarity) * u64::from(fish.rarity);
@@ -953,6 +1002,7 @@ impl GameState {
                 item_def_id: fish.item_def_id,
                 size_cm: fish.size_cm,
                 trophy: fish.trophy,
+                bonus_fish,
             },
             0,
         )
@@ -1043,6 +1093,7 @@ fn rarity_of(rolled: &Option<RolledFish>) -> u32 {
 mod tests {
     use super::*;
     use onlinerpg_shared::fishing::auto_stance;
+    use onlinerpg_shared::fishing::BONUS_FISH_MAX_CHANCE;
     use onlinerpg_shared::skills::SKILL_LEVEL_CAP;
 
     /// Fixed rolls make the pure fight step fully deterministic.
@@ -1058,6 +1109,8 @@ mod tests {
             fish_state: FishState::Running,
             state_ms_left: 2_000.0,
             tension: TENSION_INITIAL,
+            run_ms: 0.0,
+            bold_run_ms: 0.0,
             stamina: stamina_max(rarity),
             distance: 6.0,
             min_distance: MIN_FISH_DISTANCE_M,
@@ -1111,6 +1164,99 @@ mod tests {
             matches!(outcome, FightOutcome::Snapped | FightOutcome::ThrewHook),
             "hands-off play must never land a fish, got {outcome:?}"
         );
+    }
+
+    /// Bold time counts only while the fish runs, and only at or above the
+    /// bold line — a slack run and a resting fish add nothing.
+    #[test]
+    fn bold_share_is_the_bold_fraction_of_running_time() {
+        let mut f = fresh_fight(5);
+        assert_eq!(f.bold_share(), 0.0, "nothing before the first tick");
+        // Hold against a legend's run from 30: the first ticks are below the
+        // bold line, the last ones above it.
+        let mut ticks = 0;
+        while f.fish_state == FishState::Running {
+            step_fight(&mut f, 0.25, 5, 0, &mut || ROLLS);
+            ticks += 1;
+        }
+        // The flip tick is counted as the state it flipped into.
+        assert_eq!(f.run_ms, (ticks - 1) as f32 * 250.0);
+        assert!(
+            f.bold_run_ms > 0.0 && f.bold_run_ms < f.run_ms,
+            "bold {} of run {}",
+            f.bold_run_ms,
+            f.run_ms
+        );
+        let share = f.bold_share();
+        // Resting under any tension changes neither counter.
+        let (run, bold) = (f.run_ms, f.bold_run_ms);
+        step_fight(&mut f, 0.25, 5, 0, &mut || ROLLS);
+        assert_eq!(f.fish_state, FishState::Resting);
+        assert_eq!((f.run_ms, f.bold_run_ms), (run, bold));
+        assert_eq!(f.bold_share(), share);
+    }
+
+    /// The cautious policy sheds line the moment a run starts, so it never
+    /// builds bold time: safe play lands the fish and nothing more.
+    #[test]
+    fn the_cautious_policy_earns_no_bonus() {
+        for rarity in 1..=5 {
+            let mut f = fresh_fight(rarity);
+            let (outcome, _) = run_fight(&mut f, rarity, 0, |f| {
+                auto_stance(f.fish_state, f.tension.round() as u32)
+            });
+            assert_eq!(outcome, FightOutcome::Landed);
+            assert!(
+                f.bold_share() < 0.1,
+                "rarity {rarity}: cautious play must stay cold, got {}",
+                f.bold_share()
+            );
+        }
+    }
+
+    /// Riding the gauge just under the snap lands faster *and* earns the
+    /// bonus — risk pays twice, which is the point.
+    #[test]
+    fn a_bold_policy_lands_faster_and_earns_the_bonus() {
+        let bold = |f: &FightState| match f.fish_state {
+            FishState::Exhausted => FishingAction::Reel,
+            FishState::Running if f.tension >= 92.0 => FishingAction::GiveLine,
+            FishState::Running if f.tension < TENSION_BOLD + 4.0 => FishingAction::Reel,
+            FishState::Running => FishingAction::Hold,
+            _ => auto_stance(f.fish_state, f.tension.round() as u32),
+        };
+        let mut hot = fresh_fight(3);
+        let (outcome, hot_ticks) = run_fight(&mut hot, 3, 0, bold);
+        assert_eq!(outcome, FightOutcome::Landed);
+        assert!(
+            hot.bold_share() > 0.6,
+            "bold play must hold most of the run: {}",
+            hot.bold_share()
+        );
+        assert!(
+            hot.bonus_chance() > 0.36 * BONUS_FISH_MAX_CHANCE,
+            "and the chance follows the square of that share"
+        );
+
+        let mut safe = fresh_fight(3);
+        let (_, safe_ticks) = run_fight(&mut safe, 3, 0, |f| {
+            auto_stance(f.fish_state, f.tension.round() as u32)
+        });
+        assert!(
+            hot_ticks < safe_ticks,
+            "bold {hot_ticks} ticks must beat cautious {safe_ticks}"
+        );
+    }
+
+    /// Bold time is a fight statistic, not an outcome: a snapped line still
+    /// reports what was held, and the caller decides that a lost fish pays
+    /// nothing.
+    #[test]
+    fn a_snapped_line_keeps_its_bold_record() {
+        let mut f = fresh_fight(1);
+        let (outcome, _) = run_fight(&mut f, 1, 0, |_| FishingAction::Reel);
+        assert_eq!(outcome, FightOutcome::Snapped);
+        assert!(f.bold_share() > 0.0);
     }
 
     #[test]

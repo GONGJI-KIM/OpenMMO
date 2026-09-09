@@ -104,6 +104,12 @@ pub fn fishing_cast_ms() -> u32 {
     crate::fishing::CAST_MS
 }
 
+/// Tension from which a running fish counts as held bold (bonus-fish time).
+#[wasm_bindgen]
+pub fn fishing_tension_bold() -> f32 {
+    crate::fishing::TENSION_BOLD
+}
+
 /// Live instrument batch window, so the client flushes on the server's clock.
 #[wasm_bindgen]
 pub fn instrument_batch_ms() -> u32 {

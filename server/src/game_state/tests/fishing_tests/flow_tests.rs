@@ -4,7 +4,7 @@ use super::*;
 /// returning the outcome (plus every message seen on the way). The
 /// policy sees each `FishingFight` beat's state and tension — exactly
 /// what a real client (human gauge or agent reflex) gets.
-async fn fight_to_the_end(
+pub(super) async fn fight_to_the_end(
     game_state: &GameState,
     id: &PlayerId,
     rx: &mut DirectRx,
@@ -276,6 +276,7 @@ async fn full_catch_flow_awards_fish_and_skill_xp() {
     let FishingOutcome::Caught {
         item_def_id: fish_id,
         size_cm,
+        bonus_fish,
         ..
     } = outcome
     else {
@@ -298,15 +299,19 @@ async fn full_catch_flow_awards_fish_and_skill_xp() {
     // the bag; only rarity ≥ 1 (fish) grants XP.
     let defs = ItemDefs::load();
     let def = defs.get(&fish_id).expect("caught def");
+    let rarity = def.rarity_tier.unwrap_or(1);
+    let expected_units = if bonus_fish { 2 } else { 1 };
     let inv = game_state.get_player_inventory(&id).await.unwrap();
-    assert!(inv
+    let units: u32 = inv
         .bag
         .iter()
-        .any(|item| item.item_def_id == fish_id && item.quantity == 1));
+        .filter(|item| item.item_def_id == fish_id)
+        .map(|item| item.quantity)
+        .sum();
+    assert_eq!(units, expected_units);
     assert!(msgs
         .iter()
         .any(|m| matches!(m, ServerMessage::InventoryUpdated { .. })));
-    let rarity = def.rarity_tier.unwrap_or(1);
     let got_xp = msgs.iter().any(|m| {
         matches!(
             m,
@@ -441,25 +446,25 @@ async fn duplicate_hook_during_the_fight_is_ignored() {
     assert!(matches!(outcome, FishingOutcome::Caught { .. }));
 }
 
-// Species stacking is tested with deterministic awards in inventory_tests.
 #[tokio::test(start_paused = true)]
 async fn every_catch_lands_in_the_bag() {
     let game_state = make_test_game_state("fishing_catches_bagged");
     let (id, mut rx) = make_angler(&game_state, "angler_bagger").await;
 
+    let mut bagged_fish = 0u32;
     for _ in 0..3 {
         game_state.start_fishing(&id, water_target()).await;
         advance_until_bite(&game_state, &mut rx).await;
         game_state.respond_fishing(&id, FishingAction::Hook).await;
         let (outcome, _) = fight_to_the_end(&game_state, &id, &mut rx, auto_stance).await;
-        assert!(
-            matches!(outcome, FishingOutcome::Caught { .. }),
-            "perfect play must catch"
-        );
+        let FishingOutcome::Caught { bonus_fish, .. } = outcome else {
+            panic!("perfect play must catch, got {outcome:?}");
+        };
+        bagged_fish += if bonus_fish { 2 } else { 1 };
     }
     let inv = game_state.get_player_inventory(&id).await.unwrap();
-    let total: u32 = inv.bag.iter().map(|item| item.quantity).sum();
-    assert_eq!(total, 3);
+    let total_fish: u32 = inv.bag.iter().map(|item| item.quantity).sum();
+    assert_eq!(total_fish, bagged_fish);
 }
 
 // The fight: cranking the reel against a running fish pumps tension

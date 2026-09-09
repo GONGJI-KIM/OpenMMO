@@ -395,7 +395,12 @@ export type FishState = 'running' | 'resting' | 'exhausted'
  *  externally-tagged serde shape. */
 export type FishingOutcome =
   | {
-      Caught: { item_def_id: string; size_cm: number; trophy: boolean }
+      Caught: {
+        item_def_id: string
+        size_cm: number
+        trophy: boolean
+        bonus_fish: boolean
+      }
     }
   | 'Escaped'
   | 'Aborted'

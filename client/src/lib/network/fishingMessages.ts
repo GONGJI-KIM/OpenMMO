@@ -10,14 +10,18 @@ export function catchMessage(
   def: CatchDefLike | undefined,
   fallbackId: string,
   sizeCm: number,
-  trophy: boolean
+  trophy: boolean,
+  bonusFish = false
 ): string {
   const name = def?.name ?? fallbackId
   const an = /^[aeiou]/i.test(name) ? 'an' : 'a'
-  if (trophy) return `Trophy catch! ${name}, ${sizeCm} cm!`
+  const bonus = bonusFish
+    ? ' Bold fight — a second one took the trailing hook!'
+    : ''
+  if (trophy) return `Trophy catch! ${name}, ${sizeCm} cm!${bonus}`
   if (def?.category === 'coin_catch')
     return `You haul up ${an} ${name}! Double-click it in your bag to open it.`
   if (def?.category === 'fish')
-    return `You caught ${an} ${name} (${sizeCm} cm).`
+    return `You caught ${an} ${name} (${sizeCm} cm).${bonus}`
   return `You fished up ${an} ${name}.`
 }

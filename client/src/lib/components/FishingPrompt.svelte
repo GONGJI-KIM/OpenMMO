@@ -10,10 +10,12 @@
   import { networkManager } from '../network/socket'
   import { playFishingSound } from '../managers/sfxManager'
   import { isTypingTarget } from '../utils/dom'
+  import { fishing_tension_bold } from '../wasm/onlinerpg_shared'
 
   type FightStance = Exclude<FishingAction, 'hook'>
 
   const WHEEL_BURST_MS = 350
+  const TENSION_BOLD = fishing_tension_bold()
 
   const STANCE_BUTTONS = [
     { stance: 'reel', label: 'REEL IN', hint: 'hold · SPACE · wheel ↓' },
@@ -140,8 +142,12 @@
   </button>
 {:else if $myFishing.phase === 'fight'}
   {@const f = $myFishing.fight}
+  {@const bold =
+    f.fishState === 'running' && f.tension >= TENSION_BOLD && f.tension < 85}
   <div class="fight-panel">
-    {#if f.fishState === 'running'}
+    {#if bold}
+      <div class="fish-state bold">Bold! Hold it here — it tires fastest.</div>
+    {:else if f.fishState === 'running'}
       <div class="fish-state running">The fish runs — watch the tension!</div>
     {:else if f.fishState === 'resting'}
       <div class="fish-state resting">The fish holds steady.</div>
@@ -159,9 +165,16 @@
     >
       <span
         class="tension-fill"
-        class:tension-warn={f.tension >= 60 && f.tension < 85}
+        class:tension-warn={f.tension >= 60 && f.tension < 85 && !bold}
+        class:tension-bold={bold}
         class:tension-high={f.tension >= 85}
         style={`width: ${Math.min(100, f.tension)}%`}
+      ></span>
+      <span
+        class="bold-mark"
+        class:lit={bold}
+        style={`left: ${TENSION_BOLD}%`}
+        title="Bold line: a running fish held past here earns a bonus-fish chance"
       ></span>
     </div>
     <div class="stance-row">
@@ -242,6 +255,12 @@
     animation: state-pulse 0.4s ease-in-out infinite alternate;
   }
 
+  .fish-state.bold {
+    color: #ffd766;
+    text-shadow: 0 0 8px rgba(255, 215, 102, 0.6);
+    animation: state-pulse 0.4s ease-in-out infinite alternate;
+  }
+
   .fish-state.exhausted {
     color: #6fd598;
     animation: state-pulse 0.6s ease-in-out infinite alternate;
@@ -274,8 +293,38 @@
       background 0.2s;
   }
 
+  .bold-mark {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: rgba(255, 255, 255, 0.7);
+    transform: translateX(-1px);
+    transition: background 0.2s;
+  }
+
+  .bold-mark.lit {
+    background: #fff3b0;
+    box-shadow: 0 0 6px 2px rgba(255, 220, 120, 0.9);
+  }
+
   .tension-fill.tension-warn {
     background: #e8c34f;
+  }
+
+  .tension-fill.tension-bold {
+    background: linear-gradient(90deg, #e8c34f, #ffd766);
+    box-shadow: 0 0 10px 2px rgba(255, 215, 102, 0.75);
+    animation: fishing-bold-shimmer 0.5s ease-in-out infinite alternate;
+  }
+
+  @keyframes fishing-bold-shimmer {
+    from {
+      filter: brightness(1);
+    }
+    to {
+      filter: brightness(1.3);
+    }
   }
 
   .tension-fill.tension-high {

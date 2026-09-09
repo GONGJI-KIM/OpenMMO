@@ -144,7 +144,8 @@ pub const NPC_TOKEN_FILENAME: &str = "npc_token";
 /// v63: horse mounting state and mount changes.
 /// v64: mounted steering and PlayerMountTurn cancels travel at the server position.
 /// v65: mounted arc movement and explicit mount steering cancellation.
-pub const PROTOCOL_VERSION: u32 = 65;
+/// v66: bold fishing bonus chance and second-fish outcome.
+pub const PROTOCOL_VERSION: u32 = 66;
 
 /// Fingerprint of the dungeon layout generator this build compiled, stamped by
 /// `build.rs`. Layouts never travel the wire — both sides generate them from
