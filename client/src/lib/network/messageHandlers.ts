@@ -183,7 +183,10 @@ import {
 } from '../managers/instrumentAudio'
 import { shortestWrappedDeltaX } from '../terrain/world-wrap'
 import { whisperChatEntry, partyChatEntry } from '../chat-format'
-import { fishing_cast_ms } from '../wasm/onlinerpg_shared'
+import {
+  fishing_cast_ms,
+  fishing_trophy_min_tension,
+} from '../wasm/onlinerpg_shared'
 import type { NetworkEvent } from './networkEvents'
 import type {
   AccountCharacter,
@@ -1980,7 +1983,7 @@ export function handleServerMessage(
       if (isSelfPlayer(data.player_id)) {
         if (get(myFishing).phase === 'bite' && data.trophy) {
           addCombatMessage({
-            text: 'A trophy fish! Keep tension above 80 while it runs to tire it out.',
+            text: `A trophy fish! Keep tension above ${fishing_trophy_min_tension()} while it runs to tire it out.`,
             sender: 'local',
           })
         }
@@ -2015,20 +2018,20 @@ export function handleServerMessage(
         if (outcome === 'Escaped') {
           playFishingSound('snap')
           addCombatMessage({ text: 'The fish got away.', sender: 'local' })
+          addChatMessage({ text: 'The fish got away.', sender: 'system' })
         } else if (outcome === 'Aborted') {
           addCombatMessage({ text: 'You reel in your line.', sender: 'local' })
         } else if (outcome?.Caught) {
           playFishingSound('catch')
           const { item_def_id, size_cm, trophy } = outcome.Caught
-          addCombatMessage({
-            text: catchMessage(
-              getItemDef(item_def_id),
-              item_def_id,
-              size_cm,
-              trophy
-            ),
-            sender: 'local',
-          })
+          const text = catchMessage(
+            getItemDef(item_def_id),
+            item_def_id,
+            size_cm,
+            trophy
+          )
+          addCombatMessage({ text, sender: 'local' })
+          addChatMessage({ text, sender: 'system' })
         }
       }
       break

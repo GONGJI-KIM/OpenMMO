@@ -7,9 +7,8 @@ import { isRangedWeapon } from '../data/itemDefs'
 /** Offset from the wrist bone toward the palm, so a prop looks gripped. */
 const HAND_GRIP_OFFSET = new THREE.Vector3(0, 0.08, 0)
 
-// In the fishing stance the hand bone's y-z plane runs forward-down to
-// sideways, so a pure x pitch only swings the rod sideways; this euler
-// points it forward and ~25° up (about 60° bent off the forearm).
+// Seat the model's off-origin handle between the thumb and index finger.
+const FISHING_ROD_POSITION = new THREE.Vector3(0.045, 0.01, 0.06)
 const FISHING_ROD_ROTATION = new THREE.Euler(0, -Math.PI / 6, -Math.PI / 3)
 
 // A bow rides the bow hand, so it needs its own seat in the palm rather than
@@ -65,6 +64,7 @@ export function poseMainHandProp(
 ) {
   prop.position.copy(HAND_GRIP_OFFSET)
   if (itemDefId === 'fishing_rod') {
+    prop.position.copy(FISHING_ROD_POSITION)
     prop.rotation.copy(FISHING_ROD_ROTATION)
   } else if (itemDefId === MANDOLIN_ITEM_DEF_ID) {
     prop.position.copy(MANDOLIN_POSITION)

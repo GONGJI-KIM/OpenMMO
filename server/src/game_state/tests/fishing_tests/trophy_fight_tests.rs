@@ -180,3 +180,42 @@ fn every_fishable_species_has_a_more_valuable_trophy_variant() {
         assert!(trophy.catch_weight.is_none());
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn loose_trophy_hook_can_escape_after_one_second_without_a_reward() {
+    let game_state = make_test_game_state("trophy_hook_slip");
+    let (id, mut rx) = make_angler(&game_state, "loose_angler").await;
+    hook_trout(&game_state, &id, &mut rx, true).await;
+    *game_state.fishing_hook_roll.lock().unwrap() = 0.0;
+    {
+        let mut sessions = game_state.fishing_sessions.write().await;
+        let FishingPhase::Fight { state, .. } = &mut sessions.get_mut(&id).unwrap().phase else {
+            panic!()
+        };
+        state.pressure_established = true;
+        state.tension = 30.0;
+        state.state_ms_left = 10_000.0;
+        state.stance = FishingAction::GiveLine;
+    }
+    drain(&mut rx);
+    for tick in 1..=4 {
+        advance(Duration::from_millis(250)).await;
+        game_state.tick_fishing(None).await;
+        let escaped = drain(&mut rx).iter().any(|msg| {
+            matches!(
+                msg,
+                ServerMessage::FishingEnded {
+                    outcome: FishingOutcome::Escaped,
+                    ..
+                }
+            )
+        });
+        assert_eq!(escaped, tick == 4);
+    }
+    assert!(game_state
+        .get_player_inventory(&id)
+        .await
+        .unwrap()
+        .bag
+        .is_empty());
+}

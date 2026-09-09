@@ -206,6 +206,11 @@ pub const SKILL_REEL_BONUS_PCT: f32 = 1.0;
 
 /// A fight that outlives this throws the hook (`Escaped`).
 pub const FIGHT_TIMEOUT_MS: u32 = 60_000;
+/// Trophies give less time to recover from lost pressure.
+pub const TROPHY_FIGHT_TIMEOUT_MS: u32 = 40_000;
+pub const TROPHY_HOOK_CHECK_MS: f32 = 1_000.0;
+/// One roll per loose second gives a mean escape time of three seconds.
+pub const TROPHY_HOOK_SLIP_CHANCE: f32 = 1.0 / 3.0;
 
 /// Stamina pool for a rarity tier.
 pub fn stamina_max(rarity: u32) -> f32 {

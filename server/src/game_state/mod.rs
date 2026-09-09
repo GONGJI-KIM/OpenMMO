@@ -387,6 +387,8 @@ pub struct GameState {
     /// Session count mirror, so the per-move cancel check costs one atomic
     /// load for the non-fishing majority instead of a lock.
     fishing_active: Arc<std::sync::atomic::AtomicUsize>,
+    #[cfg(test)]
+    fishing_hook_roll: Arc<std::sync::Mutex<f32>>,
     /// Round-robin counter for the movement tick's water check (debuff.rs):
     /// each mover is sampled on one tick in `WATER_CHECK_TICKS`.
     water_check_tick: Arc<std::sync::atomic::AtomicU64>,
@@ -696,6 +698,8 @@ impl GameState {
             dirty_skills: Arc::new(RwLock::new(HashSet::new())),
             fishing_sessions: Arc::new(RwLock::new(HashMap::new())),
             fishing_active: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            #[cfg(test)]
+            fishing_hook_roll: Arc::new(std::sync::Mutex::new(1.0)),
             water_check_tick: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             next_fishing_session: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             height_sampler,

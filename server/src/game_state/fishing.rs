@@ -12,8 +12,9 @@ use onlinerpg_shared::fishing::{
     MIN_FISH_DISTANCE_M, PANIC_BAND_M, RARITY_SKILL_BONUS_PCT, REST_MAX_MS, REST_MIN_MS,
     RUN_MAX_MS, RUN_MAX_PER_RARITY_MS, RUN_MIN_MS, RUN_SPEED_BASE_MPS, RUN_SPEED_PER_RARITY_MPS,
     SHORE_SAMPLE_STEP_M, STAMINA_DRAIN_MIN_TENSION, STAMINA_RECOVER_PS, TENSION_GIVE_RELIEF_PS,
-    TENSION_INITIAL, TENSION_MAX, TENSION_REEL_PS, TENSION_REST_DECAY_PS, TROPHY_MIN_TENSION,
-    TROPHY_ROLL_CHANCE_PCT, TROPHY_TENSION_RATE, WAIT_MAX_MS, WAIT_MIN_MS, WATERLINE_MARGIN_M,
+    TENSION_INITIAL, TENSION_MAX, TENSION_REEL_PS, TENSION_REST_DECAY_PS, TROPHY_FIGHT_TIMEOUT_MS,
+    TROPHY_HOOK_CHECK_MS, TROPHY_HOOK_SLIP_CHANCE, TROPHY_MIN_TENSION, TROPHY_ROLL_CHANCE_PCT,
+    TROPHY_TENSION_RATE, WAIT_MAX_MS, WAIT_MIN_MS, WATERLINE_MARGIN_M,
 };
 use onlinerpg_shared::inventory::EquipSlot;
 use onlinerpg_shared::skills::SkillId;
@@ -56,6 +57,8 @@ pub(crate) struct FightState {
     pub state_ms_left: f32,
     pub tension: f32,
     pub trophy: bool,
+    pub pressure_established: bool,
+    pub loose_ms: f32,
     /// Remaining stamina; the pool size is `stamina_max(rarity)`.
     pub stamina: f32,
     /// Angler-to-fish line length (XZ meters).
@@ -85,7 +88,7 @@ pub(crate) struct FightRolls {
 pub(crate) enum FightOutcome {
     /// Tension hit the max — the line snapped.
     Snapped,
-    /// The fight outlived `FIGHT_TIMEOUT_MS` — the fish threw the hook.
+    /// The fish threw the hook from lost pressure or the fight deadline.
     ThrewHook,
     /// Exhausted fish reeled inside catch range.
     Landed,
@@ -103,7 +106,12 @@ pub(crate) fn step_fight(
     roll: &mut impl FnMut() -> FightRolls,
 ) -> Option<FightOutcome> {
     f.elapsed_ms += dt * 1000.0;
-    if f.elapsed_ms >= FIGHT_TIMEOUT_MS as f32 {
+    let timeout_ms = if f.trophy {
+        TROPHY_FIGHT_TIMEOUT_MS
+    } else {
+        FIGHT_TIMEOUT_MS
+    };
+    if f.elapsed_ms >= timeout_ms as f32 {
         return Some(FightOutcome::ThrewHook);
     }
 
@@ -185,6 +193,34 @@ pub(crate) fn step_fight(
         && f.distance <= f.min_distance + CATCH_SLACK_M
     {
         return Some(FightOutcome::Landed);
+    }
+    None
+}
+
+/// Check only uninterrupted loose running time after pressure was first established.
+pub(crate) fn step_hook_slip(
+    f: &mut FightState,
+    dt: f32,
+    roll: &mut impl FnMut() -> f32,
+) -> Option<FightOutcome> {
+    if !f.trophy || f.fish_state != FishState::Running || f.stamina <= 0.0 {
+        f.loose_ms = 0.0;
+        return None;
+    }
+    if f.tension >= TROPHY_MIN_TENSION {
+        f.pressure_established = true;
+        f.loose_ms = 0.0;
+        return None;
+    }
+    if !f.pressure_established {
+        return None;
+    }
+    f.loose_ms += dt * 1000.0;
+    while f.loose_ms >= TROPHY_HOOK_CHECK_MS {
+        f.loose_ms -= TROPHY_HOOK_CHECK_MS;
+        if roll() < TROPHY_HOOK_SLIP_CHANCE {
+            return Some(FightOutcome::ThrewHook);
+        }
     }
     None
 }
@@ -793,6 +829,16 @@ impl GameState {
                 *last_tick = now;
                 let outcome = step_fight(state, dt, rarity, skill, &mut || {
                     roll_fight(rarity, &mut rng)
+                })
+                .or_else(|| {
+                    step_hook_slip(state, dt, &mut || {
+                        #[cfg(test)]
+                        {
+                            *self.fishing_hook_roll.lock().unwrap()
+                        }
+                        #[cfg(not(test))]
+                        rng.gen::<f32>()
+                    })
                 });
                 // The exhausted reel-in steers home along the cast ray,
                 // whose waterline the session measured.
@@ -880,7 +926,7 @@ impl GameState {
         let Some(player_pos) = self.players.read().await.get(player_id).map(|p| p.position) else {
             return;
         };
-        let announce = {
+        let (announce, trophy) = {
             let mut sessions = self.fishing_sessions.write().await;
             let Some(session) = sessions.get_mut(player_id) else {
                 return;
@@ -895,13 +941,16 @@ impl GameState {
                 (1.0, 0.0)
             };
             let rolls = roll_fight(rarity, &mut rand::thread_rng());
+            let trophy = session.rolled_fish.as_ref().is_some_and(|f| f.trophy);
             session.phase = FishingPhase::Fight {
                 state: FightState {
                     stance: FishingAction::Hold,
                     fish_state: FishState::Running,
                     state_ms_left: rolls.next_run_ms,
                     tension: TENSION_INITIAL,
-                    trophy: session.rolled_fish.as_ref().is_some_and(|f| f.trophy),
+                    trophy,
+                    pressure_established: false,
+                    loose_ms: 0.0,
                     stamina: stamina_max(rarity),
                     distance: len.max(session.reel_floor_m),
                     min_distance: session.reel_floor_m,
@@ -911,12 +960,8 @@ impl GameState {
                 },
                 last_tick: Instant::now(),
             };
-            (
-                session.bobber,
-                session.rolled_fish.as_ref().is_some_and(|f| f.trophy),
-            )
+            (session.bobber, trophy)
         };
-        let (announce, trophy) = announce;
         self.broadcast_fishing(
             &announce,
             ServerMessage::FishingFight {
@@ -1076,6 +1121,8 @@ mod tests {
             state_ms_left: 2_000.0,
             tension: TENSION_INITIAL,
             trophy: false,
+            pressure_established: false,
+            loose_ms: 0.0,
             stamina: stamina_max(rarity),
             distance: 6.0,
             min_distance: MIN_FISH_DISTANCE_M,
@@ -1202,10 +1249,63 @@ mod tests {
             if let Some(o) = step_fight(&mut f, 0.25, rarity, skill, &mut || {
                 roll_fight(rarity, &mut rng)
             }) {
+                if trophy {
+                    assert_ne!(o, FightOutcome::Snapped, "the policy must control tension");
+                }
                 return o == FightOutcome::Landed;
             }
         }
         panic!("fight never ended");
+    }
+
+    #[test]
+    fn loose_hook_rolls_once_per_second_and_can_survive_multiple_rolls() {
+        let mut f = fresh_fight(3);
+        f.trophy = true;
+        f.pressure_established = true;
+        let mut rolls = [0.9, TROPHY_HOOK_SLIP_CHANCE, 0.0].into_iter();
+        let mut checks = 0;
+        for tick in 1..=12 {
+            let outcome = step_hook_slip(&mut f, 0.25, &mut || {
+                checks += 1;
+                rolls.next().unwrap()
+            });
+            assert_eq!(checks, tick / 4);
+            assert_eq!(
+                outcome,
+                if tick == 12 {
+                    Some(FightOutcome::ThrewHook)
+                } else {
+                    None
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn loose_hook_timer_exempts_buildup_rest_and_exhaustion_and_resets_on_pressure() {
+        let mut f = fresh_fight(3);
+        let mut never_roll = || panic!("no hook check expected");
+        step_hook_slip(&mut f, 5.0, &mut never_roll);
+        f.trophy = true;
+        step_hook_slip(&mut f, 5.0, &mut never_roll);
+        f.tension = TROPHY_MIN_TENSION;
+        step_hook_slip(&mut f, 0.25, &mut never_roll);
+        assert!(f.pressure_established);
+        for state in [FishState::Running, FishState::Resting, FishState::Exhausted] {
+            f.fish_state = FishState::Running;
+            f.tension = 70.0;
+            step_hook_slip(&mut f, 0.75, &mut never_roll);
+            f.fish_state = state;
+            if state == FishState::Running {
+                f.tension = TROPHY_MIN_TENSION;
+            }
+            step_hook_slip(&mut f, 0.25, &mut never_roll);
+            assert_eq!(f.loose_ms, 0.0);
+        }
+        f.fish_state = FishState::Running;
+        f.stamina = 0.0;
+        step_hook_slip(&mut f, 5.0, &mut never_roll);
     }
 
     #[test]
@@ -1227,6 +1327,21 @@ mod tests {
     }
 
     #[test]
+    fn trophies_time_out_at_forty_seconds_and_ordinary_fish_at_sixty() {
+        for (trophy, deadline) in [(true, 40_000.0), (false, 60_000.0)] {
+            let mut f = fresh_fight(3);
+            f.trophy = trophy;
+            f.elapsed_ms = deadline - 500.0;
+            f.stance = FishingAction::GiveLine;
+            assert_eq!(step_fight(&mut f, 0.25, 3, 0, &mut || ROLLS), None);
+            assert_eq!(
+                step_fight(&mut f, 0.25, 3, 0, &mut || ROLLS),
+                Some(FightOutcome::ThrewHook)
+            );
+        }
+    }
+
+    #[test]
     fn trophy_policy_survives_human_reaction_delay() {
         for skill in [0, SKILL_LEVEL_CAP] {
             for rarity in 1..=5 {
@@ -1234,9 +1349,9 @@ mod tests {
                     let landed = (0..200)
                         .filter(|seed| lagged_fight_lands(rarity, rtt, *seed, true, skill))
                         .count();
-                    assert_eq!(
-                        landed, 200,
-                        "skill {skill}, trophy rarity {rarity}, rtt {rtt}"
+                    assert!(
+                        landed >= 150,
+                        "skill {skill}, trophy rarity {rarity}, rtt {rtt}: {landed}/200 landed"
                     );
                 }
             }

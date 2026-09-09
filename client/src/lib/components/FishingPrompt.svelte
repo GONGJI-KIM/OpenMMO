@@ -150,7 +150,7 @@
       <div class="fish-state bold">Good tension — the trophy is tiring!</div>
     {:else if f.trophy && f.fishState === 'running'}
       <div class="fish-state running">
-        Keep tension above {TROPHY_MIN_TENSION} to tire it!
+        Reel back to {TROPHY_MIN_TENSION}+ — a loose line can lose the hook!
       </div>
     {:else if f.fishState === 'running'}
       <div class="fish-state running">The fish runs — watch the tension!</div>

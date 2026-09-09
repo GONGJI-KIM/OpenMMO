@@ -222,14 +222,18 @@ the angler holds one of three stances, changed any time via
   the line floor (within 0.3 m) and it lands (`Caught`). A lively fish
   dragged within 1 m of the floor panics into a fresh run instead, so only
   a spent fish can ever be landed. A fight
-  that outlives 60 s throws the hook (`Escaped`): slack-line stalling is not
+  that reaches 60 s (40 s for trophies) throws the hook (`Escaped`): slack-line stalling is not
   a strategy, and neither is walking away (unmanaged tension snaps within
   seconds).
 
 Trophy status is rolled at the bite, using `TROPHY_ROLL_CHANCE_PCT` or
 the species-size threshold. It is announced on the first fight beat and stays
 fixed through landing. Trophy fish drain stamina only while Running at
-**80 or higher tension**. Below 80 they do not tire; resting on slack line
+**80 or higher tension**. After first reaching 80 during a run, each full
+second spent continuously below 80 while Running rolls a 1/3 chance to
+lose the hook (three seconds on average, not a fixed deadline). Reaching
+80 or entering Resting resets that timer. The initial pressure buildup and
+exhausted reel-in are exempt. Below 80 they do not tire; resting on slack line
 still restores stamina. Their tension changes at 40% of the ordinary
 rate so the narrow high-tension band is playable with human reaction delay.
 There is no final score gate: an exhausted trophy lands normally, while a
