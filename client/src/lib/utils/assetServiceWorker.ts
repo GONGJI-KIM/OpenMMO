@@ -1,14 +1,14 @@
-import { getHashedModelAssetUrls } from './assetUrl'
+import { getCachedAssetUrls } from './assetUrl'
 
-const MANIFEST_MESSAGE = 'openmmo:model-manifest'
+const MANIFEST_MESSAGE = 'openmmo:asset-manifest'
 
-export async function registerModelServiceWorker(): Promise<void> {
+export async function registerAssetServiceWorker(): Promise<void> {
   if (!('serviceWorker' in navigator)) return
 
   try {
     const message = {
       type: MANIFEST_MESSAGE,
-      urls: getHashedModelAssetUrls(),
+      urls: getCachedAssetUrls(),
     }
     const notified = new WeakSet<ServiceWorker>()
     const sendManifest = (worker: ServiceWorker | null): void => {
@@ -38,6 +38,6 @@ export async function registerModelServiceWorker(): Promise<void> {
       .then((readyRegistration) => sendManifest(readyRegistration.active))
       .catch(() => {})
   } catch (error) {
-    console.warn('Model service worker registration failed', error)
+    console.warn('Asset service worker registration failed', error)
   }
 }
