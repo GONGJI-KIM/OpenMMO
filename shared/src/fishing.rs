@@ -47,7 +47,7 @@ pub enum FishingOutcome {
         /// Rolled length in centimeters — announced, not stored on the item,
         /// so fish stay stackable commodities.
         size_cm: u16,
-        /// Natural 20 on the quality roll, or at/over the species' trophyCm.
+        /// Successful trophy roll, or at/over the species' trophyCm.
         trophy: bool,
     },
     /// Hooked too early, too late, or not at all.
@@ -93,6 +93,9 @@ pub const LATENCY_GRACE_MS: u32 = 500;
 /// Flotsam's fixed share of the catch table, percent. Skill makes you a
 /// better angler, not a tidier river, so junk never thins out with level.
 pub const FLOTSAM_SHARE_PCT: u64 = 20;
+
+/// Trophy roll among fish; with 20% flotsam this gives 16% of all bites.
+pub const TROPHY_ROLL_CHANCE_PCT: u32 = 20;
 
 /// Percent catch-weight growth per fishing level per rarity tier.
 /// Multiplicative, so the table's order can never invert.

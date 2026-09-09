@@ -85,10 +85,12 @@ skill closes the gap on rare fish but can never invert the table's order.
 Flotsam holds a flat `FLOTSAM_SHARE_PCT` (20%) of the draw at every level,
 so junk never thins out as the fish pool grows. `minFishingLevel` locks a
 species until the angler earns it: salmon at 10, golden sturgeon at 20.
-Size: `sizeDice`,
-plus a d20 quality roll; a natural 20 doubles the size and — for fish —
-is always a trophy. Trophies are a fish concept: a nat-20 Old Boot is
-just a very large boot, no celebration.
+Size uses `sizeDice`. Each fish has a 20% trophy roll, which doubles its
+size and guarantees trophy status. A failed roll can still produce a trophy
+if the ordinary size meets `trophyCm`. Junk never becomes a trophy.
+With the fixed 20% flotsam share, trophies occur on about 16–17% of all
+bites (about 84% chance of at least one in ten bites). Landing one still
+requires winning its high-tension fight.
 
 Fish are sellable (`basePrice`, ordinary merchant flow) and edible —
 `category "fish"` uses the food eating effect. Fish stack by species and
@@ -224,8 +226,8 @@ the angler holds one of three stances, changed any time via
   a strategy, and neither is walking away (unmanaged tension snaps within
   seconds).
 
-Trophy status is rolled at the bite, using the existing natural-20 or
-species-size threshold. It is announced on the first fight beat and stays
+Trophy status is rolled at the bite, using `TROPHY_ROLL_CHANCE_PCT` or
+the species-size threshold. It is announced on the first fight beat and stays
 fixed through landing. Trophy fish drain stamina only while Running at
 **80 or higher tension**. Below 80 they do not tire; resting on slack line
 still restores stamina. Their tension changes at 40% of the ordinary

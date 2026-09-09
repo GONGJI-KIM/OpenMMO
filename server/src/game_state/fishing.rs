@@ -13,7 +13,7 @@ use onlinerpg_shared::fishing::{
     RUN_MAX_MS, RUN_MAX_PER_RARITY_MS, RUN_MIN_MS, RUN_SPEED_BASE_MPS, RUN_SPEED_PER_RARITY_MPS,
     SHORE_SAMPLE_STEP_M, STAMINA_DRAIN_MIN_TENSION, STAMINA_RECOVER_PS, TENSION_GIVE_RELIEF_PS,
     TENSION_INITIAL, TENSION_MAX, TENSION_REEL_PS, TENSION_REST_DECAY_PS, TROPHY_MIN_TENSION,
-    TROPHY_TENSION_RATE, WAIT_MAX_MS, WAIT_MIN_MS, WATERLINE_MARGIN_M,
+    TROPHY_ROLL_CHANCE_PCT, TROPHY_TENSION_RATE, WAIT_MAX_MS, WAIT_MIN_MS, WATERLINE_MARGIN_M,
 };
 use onlinerpg_shared::inventory::EquipSlot;
 use onlinerpg_shared::skills::SkillId;
@@ -850,7 +850,7 @@ impl GameState {
             let mut rng = rand::thread_rng();
             (
                 pick_catch(&weights, rng.gen_range(0..total))?,
-                rng.gen_range(1..=20u32),
+                rng.gen_range(0..100u32),
             )
         };
         let picked = &candidates[index];
@@ -860,12 +860,11 @@ impl GameState {
             .as_deref()
             .map(crate::game::combat::roll_dice)
             .unwrap_or(10) as u16;
-        // Natural 20 on the quality roll: a once-in-a-session monster.
-        let nat_twenty = quality == 20;
-        if nat_twenty {
+        let trophy_roll = def.is_fish() && quality < TROPHY_ROLL_CHANCE_PCT;
+        if trophy_roll {
             size_cm = size_cm.saturating_mul(2);
         }
-        let trophy = def.trophy_at(size_cm, nat_twenty);
+        let trophy = def.trophy_at(size_cm, trophy_roll);
         Some(RolledFish {
             item_def_id: picked.item_def_id.clone(),
             rarity: picked.rarity,

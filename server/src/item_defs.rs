@@ -313,12 +313,10 @@ impl ItemDefinition {
         self.category.as_deref() == Some("coin_catch")
     }
 
-    /// Whether a catch of this item at `size_cm` is a trophy. Trophies are
-    /// a fish concept — a nat-20 Old Boot is still just a (very large) boot —
-    /// and fire on the natural-20 quality roll or on meeting `trophyCm`.
-    pub fn trophy_at(&self, size_cm: u16, nat_twenty: bool) -> bool {
+    /// Only fish become trophies, from the trophy roll or the size threshold.
+    pub fn trophy_at(&self, size_cm: u16, trophy_roll: bool) -> bool {
         self.is_fish()
-            && (nat_twenty
+            && (trophy_roll
                 || self
                     .trophy_cm
                     .is_some_and(|threshold| u32::from(size_cm) >= threshold))
@@ -961,8 +959,7 @@ mod tests {
         );
     }
 
-    /// Trophies are gated to fish: junk never celebrates, a natural 20 always
-    /// does on a fish, and the size threshold is an exact boundary.
+    /// Junk never becomes a trophy, even on a successful trophy roll.
     #[test]
     fn trophies_are_a_fish_concept() {
         let defs = ItemDefs::load();
@@ -974,7 +971,7 @@ mod tests {
         let minnow = defs.get("raw_minnow").unwrap();
         assert!(
             minnow.trophy_at(1, true),
-            "a natural 20 is always a trophy on a fish"
+            "a successful trophy roll always makes a fish a trophy"
         );
         let trout = defs.get("raw_trout").unwrap();
         let threshold = trout.trophy_cm.unwrap() as u16;
