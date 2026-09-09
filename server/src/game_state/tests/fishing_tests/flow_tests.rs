@@ -441,8 +441,7 @@ async fn duplicate_hook_during_the_fight_is_ignored() {
     assert!(matches!(outcome, FishingOutcome::Caught { .. }));
 }
 
-/// Every landed catch reaches the bag. How they pile up by species is
-/// covered by `inventory_tests`, where the species is not a random roll.
+// Species stacking is tested with deterministic awards in inventory_tests.
 #[tokio::test(start_paused = true)]
 async fn every_catch_lands_in_the_bag() {
     let game_state = make_test_game_state("fishing_catches_bagged");

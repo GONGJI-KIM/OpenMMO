@@ -96,15 +96,14 @@ async fn bag_of(game_state: &GameState, id: &PlayerId) -> Vec<(String, u32)> {
         .await
         .unwrap()
         .bag
-        .iter()
-        .map(|i| (i.item_def_id.clone(), i.quantity))
+        .into_iter()
+        .map(|item| (item.item_def_id, item.quantity))
         .collect();
     bag.sort();
     bag
 }
 
-/// Landing a species piles onto its existing entry; a second species opens a
-/// second slot. Species are awarded directly since the bite roll is random.
+// Direct awards avoid random species rolls.
 #[tokio::test]
 async fn catches_stack_per_species() {
     let game_state = make_test_game_state("fishing_stack_species");
@@ -121,8 +120,7 @@ async fn catches_stack_per_species() {
     );
 }
 
-/// A fresh catch joins the pile the angler already carries instead of taking a
-/// new slot, and the pile keeps its instance id so client slots stay put.
+// Joining a stack preserves its instance ID.
 #[tokio::test]
 async fn a_catch_joins_the_existing_pile() {
     let game_state = make_test_game_state("fishing_stack_join");
@@ -139,17 +137,9 @@ async fn a_catch_joins_the_existing_pile() {
     game_state.award_item(&id, "raw_perch").await;
 
     let inv = game_state.get_player_inventory(&id).await.unwrap();
-    let perch: Vec<_> = inv
-        .bag
-        .iter()
-        .filter(|i| i.item_def_id == "raw_perch")
-        .collect();
-    assert_eq!(perch.len(), 1, "one perch entry, not two");
-    assert_eq!(perch[0].quantity, 3);
-    assert_eq!(perch[0].instance_id, 900);
+    assert_eq!(inv.bag, vec![bag_item(900, "raw_perch", 3)]);
 }
 
-/// Eating from a pile takes one fish and leaves the rest in the same slot.
 #[tokio::test]
 async fn eating_one_fish_from_a_pile_leaves_the_rest() {
     let game_state = make_test_game_state("fishing_stack_eat");
