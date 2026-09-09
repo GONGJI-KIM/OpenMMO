@@ -9,6 +9,7 @@ export type FightStatus = {
   tension: number
   /** Fish stamina 0–100; at 0 it goes exhausted and can be landed. */
   stamina: number
+  trophy: boolean
 }
 
 /** The local player's place in the fishing loop — one value, so phase and
@@ -27,11 +28,12 @@ export const myFishing = writable<MyFishing>({ phase: 'idle' })
 export function applyFightUpdate(
   fishState: FishState,
   tension: number,
-  stamina: number
+  stamina: number,
+  trophy = false
 ) {
   myFishing.update((f) => {
     if (f.phase === 'fight' || f.phase === 'bite') {
-      return { phase: 'fight', fight: { fishState, tension, stamina } }
+      return { phase: 'fight', fight: { fishState, tension, stamina, trophy } }
     }
     return f
   })

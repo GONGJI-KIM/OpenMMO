@@ -9,12 +9,12 @@ use onlinerpg_shared::fishing::{
 };
 use tokio::time::{advance, Duration};
 
-mod bold_fight_tests;
 mod economy_tests;
 mod flow_tests;
 mod interruption_tests;
 mod inventory_tests;
 mod session_tests;
+mod trophy_fight_tests;
 
 /// Player on the shore of the test world's western sea (negative x is
 /// 5 m underwater in `SplitWorldTiles`), rod equipped, ready to cast.

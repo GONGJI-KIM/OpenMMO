@@ -408,9 +408,6 @@ pub struct GameState {
     /// arriving at random.
     #[cfg(test)]
     ambient_spawns_enabled: Arc<std::sync::atomic::AtomicBool>,
-    /// Test-only: pins the bonus-fish roll so landing tests are deterministic.
-    #[cfg(test)]
-    fishing_bonus_roll: Arc<std::sync::Mutex<Option<f32>>>,
     housing_io: Arc<HousingIO>,
     terrain_io: Arc<onlinerpg_terrain::io::TerrainIO>,
     /// Uploaded cape textures: what a worn `cape_texture` is checked against
@@ -706,8 +703,6 @@ impl GameState {
             splat_sampler,
             #[cfg(test)]
             ambient_spawns_enabled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            #[cfg(test)]
-            fishing_bonus_roll: Arc::new(std::sync::Mutex::new(None)),
             monster_brains: Arc::new(Mutex::new(monster_ai::ServerBrains::new())),
             server_monster_ai: Arc::new(std::sync::atomic::AtomicBool::new(
                 !cfg!(test) && crate::world_config::world_config().server_monster_ai,

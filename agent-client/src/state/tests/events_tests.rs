@@ -218,7 +218,7 @@ async fn a_beat_during_the_reaction_is_missed() {
         fish_state: FishState::Resting,
         tension_pct,
         stamina_pct: 50,
-        bonus_chance_pct: 0,
+        trophy: false,
     };
 
     s.push_event(beat(20));

@@ -104,10 +104,10 @@ pub fn fishing_cast_ms() -> u32 {
     crate::fishing::CAST_MS
 }
 
-/// Tension from which a running fish counts as held bold (bonus-fish time).
+/// Minimum running tension that tires a trophy fish.
 #[wasm_bindgen]
-pub fn fishing_tension_bold() -> f32 {
-    crate::fishing::TENSION_BOLD
+pub fn fishing_trophy_min_tension() -> f32 {
+    crate::fishing::TROPHY_MIN_TENSION
 }
 
 /// Live instrument batch window, so the client flushes on the server's clock.

@@ -1978,7 +1978,18 @@ export function handleServerMessage(
         data.stamina_pct
       )
       if (isSelfPlayer(data.player_id)) {
-        applyFightUpdate(data.fish_state, data.tension_pct, data.stamina_pct)
+        if (get(myFishing).phase === 'bite' && data.trophy) {
+          addCombatMessage({
+            text: 'A trophy fish! Keep tension above 80 while it runs to tire it out.',
+            sender: 'local',
+          })
+        }
+        applyFightUpdate(
+          data.fish_state,
+          data.tension_pct,
+          data.stamina_pct,
+          data.trophy
+        )
       }
       break
     }
@@ -2008,14 +2019,13 @@ export function handleServerMessage(
           addCombatMessage({ text: 'You reel in your line.', sender: 'local' })
         } else if (outcome?.Caught) {
           playFishingSound('catch')
-          const { item_def_id, size_cm, trophy, bonus_fish } = outcome.Caught
+          const { item_def_id, size_cm, trophy } = outcome.Caught
           addCombatMessage({
             text: catchMessage(
               getItemDef(item_def_id),
               item_def_id,
               size_cm,
-              trophy,
-              bonus_fish
+              trophy
             ),
             sender: 'local',
           })

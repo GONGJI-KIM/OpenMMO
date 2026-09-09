@@ -42,7 +42,8 @@ endgame combat loot (`server/src/item_defs.rs::equipment_ids_with_min_price`).
   file; they sample as flat sea level, matching the client's synthesis.
 - **Wait**: uniform 4–12 s, shortened 2% per fishing level (floored at half
   the minimum). The fish — species, size, trophy — is rolled *at the bite*,
-  not at resolution, but only revealed on a catch.
+  not at resolution. Trophy status is revealed at the hook; species and
+  exact size are revealed on landing.
 - **Bite** (`FishingBite` broadcast): the bobber dips. `Hook` must arrive
   within 2.5 s plus 0.5 s latency grace — judged against the server's own
   clock, so a laggy-but-in-time click is never punished and a hacked client
@@ -52,7 +53,7 @@ endgame combat loot (`server/src/item_defs.rs::equipment_ids_with_min_price`).
   handler, not the tick.
 - **End** (`FishingEnded { outcome }` broadcast): `Caught { item_def_id,
   size_cm, trophy }`, `Escaped`, or `Aborted`. A caught fish arrives through
-  the normal `InventoryUpdated` (fish stack by species — size and trophy are
+  the normal `InventoryUpdated` (fish stack by species and trophy variant — exact size is
   announced, not stored), or spills as a ground item when the
   bag can't take the weight — never silently lost. Moving, attacking,
   disconnecting, dying, stowing the rod (unequipping it, or swapping a
@@ -90,9 +91,8 @@ is always a trophy. Trophies are a fish concept: a nat-20 Old Boot is
 just a very large boot, no celebration.
 
 Fish are sellable (`basePrice`, ordinary merchant flow) and edible —
-`category "fish"` maps to the same `Heal(dice)` use-effect as potions. Every
-catch takes its own bag slot (`stackable false`, like the equipment rows), so
-the bag reads as a catch log. Size is deliberately **not stored on the item**;
+`category "fish"` uses the food eating effect. Fish stack by species and
+trophy variant. Exact size is deliberately **not stored on the item**;
 it lives only in the catch announcement.
 
 Prices are anchored to the game's *income* economy, not just the catalog:
@@ -211,7 +211,7 @@ the angler holds one of three stances, changed any time via
   the rod's 2 m reach. The exhausted reel-in also steers the fish back onto
   the cast ray, so it comes home along the line whose waterline was actually
   measured — the float stays on the water instead of climbing the shore.
-- **Stamina** (hidden from the gauge; read it from the splash): only drag
+- **Stamina** (shown on the HUD and in the splash): only drag
   burns it — Running under ≥20 tension costs `2 + 12·(tension/100)²` per
   second; the square means timid mid-band play barely tires the fish and
   real progress comes from riding the gauge near the top, while a slack
@@ -223,30 +223,25 @@ the angler holds one of three stances, changed any time via
   that outlives 60 s throws the hook (`Escaped`): slack-line stalling is not
   a strategy, and neither is walking away (unmanaged tension snaps within
   seconds).
-- **Bold play → bonus fish**: the server counts how long the fish has Run
-  and how much of that the line was held at or above `TENSION_BOLD` (80,
-  just under the red band). That *bold share*, squared and scaled by
-  `BONUS_FISH_MAX_CHANCE` (25%), is the chance — broadcast live as
-  `FishingFight.bonus_chance_pct` — that a second fish of the same species
-  took the trailing hook at landing (`Caught.bonus_fish`). Risk pays twice
-  on purpose: bold play already tires the fish fastest, and now it also pays
-  out, so a cautious angler and a bold one play different games rather than
-  different clocks. Continuous, so there is no threshold to camp on. Junk and
-  coin pouches (rarity 0) never double, and the bonus grants no extra XP.
 
-  | bold share of running time | bonus chance |
-  |---|---|
-  | 25% | 1.6% |
-  | 50% | 6.3% |
-  | 75% | 14.1% |
-  | 100% | 25% |
+Trophy status is rolled at the bite, using the existing natural-20 or
+species-size threshold. It is announced on the first fight beat and stays
+fixed through landing. Trophy fish drain stamina only while Running at
+**80 or higher tension**. Below 80 they do not tire; resting on slack line
+still restores stamina. Their tension changes at 40% of the ordinary
+rate so the narrow high-tension band is playable with human reaction delay.
+There is no final score gate: an exhausted trophy lands normally, while a
+snapped line or timeout awards no fish. The shared agent reflex uses the
+same trophy flag and reacts with its usual delay.
 
-  The hook-set opens at tension 30 and every rest lets it decay, so the
-  climb back past 80 never counts: a superb human fight lands around a
-  70–85% share (12–18%); the 25% cap is theoretical.
+Successful trophies award exactly one `trophy_*` fish: a separate stack
+with the same species icon, twice its ordinary weight, and three times its
+base price. It remains edible and grills into the ordinary cooked fish.
+Catch XP and species titles are granted once as before. Ordinary catches
+are unchanged. There is no second-fish roll or accumulated bonus chance.
 
 Every beat is broadcast as `FishingFight { bobber, fish_state, tension_pct,
-stamina_pct }` — public information by design, which is what keeps humans
+stamina_pct, trophy }` — public information by design, which is what keeps humans
 (reading gauge and splash) and agent-clients (running the shared
 `auto_stance` policy on a human reaction delay, below) on equal footing.
 Trophy catches are celebrated to everyone in delivery radius via the

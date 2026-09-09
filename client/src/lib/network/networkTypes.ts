@@ -399,7 +399,6 @@ export type FishingOutcome =
         item_def_id: string
         size_cm: number
         trophy: boolean
-        bonus_fish: boolean
       }
     }
   | 'Escaped'

@@ -49,9 +49,6 @@ pub enum FishingOutcome {
         size_cm: u16,
         /// Natural 20 on the quality roll, or at/over the species' trophyCm.
         trophy: bool,
-        /// A second fish of the same kind took the trailing hook — rolled
-        /// with `bonus_fish_chance` at landing. Never junk.
-        bonus_fish: bool,
     },
     /// Hooked too early, too late, or not at all.
     Escaped,
@@ -120,36 +117,10 @@ pub const ESCAPE_XP: u64 = 2;
 pub const TENSION_MAX: f32 = 100.0;
 /// Tension the hook-set itself puts on the line — the fight opens live.
 pub const TENSION_INITIAL: f32 = 30.0;
-
-/// A running fish held at or above this tension counts as *bold* time.
-/// Sits just under the gauge's red band (85): under a human reaction delay
-/// the line can only be kept here by someone reading the fight, and a slip
-/// snaps it. Risk is rewarded twice — it tires the fish fastest *and* feeds
-/// the bonus-fish chance.
-pub const TENSION_BOLD: f32 = 80.0;
-
-/// Bonus-fish chance for a fight held bold from first run to landing. A
-/// second fish is a treat, not the supply: even perfect play doubles one
-/// catch in four.
-pub const BONUS_FISH_MAX_CHANCE: f32 = 0.25;
-
-/// Share (0–1) of the fish's running time the line was held at or above
-/// `TENSION_BOLD`.
-pub fn bold_share(bold_run_ms: f32, run_ms: f32) -> f32 {
-    if run_ms <= 0.0 {
-        return 0.0;
-    }
-    (bold_run_ms / run_ms).clamp(0.0, 1.0)
-}
-
-/// Chance (0–1) of a second fish: `bold_share² · BONUS_FISH_MAX_CHANCE`.
-/// Squared so half-hearted pressure earns almost nothing while a fight held
-/// bold throughout earns the cap; continuous so there is no threshold to
-/// camp on.
-pub fn bonus_fish_chance(bold_run_ms: f32, run_ms: f32) -> f32 {
-    let share = bold_share(bold_run_ms, run_ms);
-    share * share * BONUS_FISH_MAX_CHANCE
-}
+/// Trophy fish only tire above this line while running.
+pub const TROPHY_MIN_TENSION: f32 = 80.0;
+/// Scale both tension gain and relief to allow reactions near the limit.
+pub const TROPHY_TENSION_RATE: f32 = 0.4;
 /// Fish pull while Running: `(BASE + PER_RARITY·rarity) · distance factor`,
 /// reduced by skill (`SKILL_PULL_RELIEF_PCT`). Deliberately hot: an
 /// unmanaged run leaves the safe range in about a second and snaps the line
@@ -263,12 +234,18 @@ pub fn reel_speed_mps(state: FishState, skill_level: u32) -> f32 {
     base * (1.0 + SKILL_REEL_BONUS_PCT * skill_level as f32 / 100.0)
 }
 
-/// The sound tension-management policy, shared so the agent-client's reflex
-/// and the server tests play the same game a practiced human does: reel an
-/// exhausted fish, shed tension when it's high, take line when it's safe.
-/// A run is never cranked against: `TENSION_REEL_PS` stacks on the pull, and
-/// a human-speed hand cannot back off in time.
-pub fn auto_stance(state: FishState, tension_pct: u32) -> FishingAction {
+/// Agent reflex with the same visible state and reaction delay as a human.
+/// Trophies need high tension; ordinary fish use the safer middle band.
+pub fn auto_stance(state: FishState, tension_pct: u32, trophy: bool) -> FishingAction {
+    if trophy {
+        return match state {
+            FishState::Exhausted => FishingAction::Reel,
+            _ if tension_pct >= 83 => FishingAction::GiveLine,
+            FishState::Running => FishingAction::Hold,
+            _ if tension_pct < 50 => FishingAction::Reel,
+            _ => FishingAction::Hold,
+        };
+    }
     match state {
         FishState::Exhausted => FishingAction::Reel,
         FishState::Running if tension_pct >= 45 => FishingAction::GiveLine,
@@ -306,24 +283,30 @@ mod tests {
     #[test]
     fn auto_stance_manages_the_band() {
         assert_eq!(
-            auto_stance(FishState::Exhausted, 90),
+            auto_stance(FishState::Exhausted, 90, false),
             FishingAction::Reel,
             "an exhausted fish is reeled no matter the tension"
         );
-        assert_eq!(auto_stance(FishState::Running, 80), FishingAction::GiveLine);
-        assert_eq!(auto_stance(FishState::Resting, 10), FishingAction::Reel);
         assert_eq!(
-            auto_stance(FishState::Running, 50),
+            auto_stance(FishState::Running, 80, false),
+            FishingAction::GiveLine
+        );
+        assert_eq!(
+            auto_stance(FishState::Resting, 10, false),
+            FishingAction::Reel
+        );
+        assert_eq!(
+            auto_stance(FishState::Running, 50, false),
             FishingAction::GiveLine,
             "a run is answered with line, not held to the top of the band"
         );
         assert_eq!(
-            auto_stance(FishState::Running, 20),
+            auto_stance(FishState::Running, 20, false),
             FishingAction::Hold,
             "a slack line during a run needs nothing"
         );
         assert_eq!(
-            auto_stance(FishState::Resting, 60),
+            auto_stance(FishState::Resting, 60, false),
             FishingAction::Hold,
             "a resting fish sheds tension on its own"
         );
@@ -337,33 +320,6 @@ mod tests {
         // exhausted fish, while a lively one panics before it gets there.
         assert!(CATCH_SLACK_M < PANIC_BAND_M);
         assert!(WATERLINE_MARGIN_M < MIN_FISH_DISTANCE_M);
-    }
-
-    #[test]
-    fn bold_share_is_the_bold_fraction_of_the_run() {
-        assert_eq!(bold_share(0.0, 0.0), 0.0, "no run, no share");
-        assert_eq!(bold_share(0.0, 4_000.0), 0.0);
-        assert_eq!(bold_share(1_000.0, 4_000.0), 0.25);
-        assert_eq!(bold_share(4_000.0, 4_000.0), 1.0);
-        assert_eq!(bold_share(5_000.0, 4_000.0), 1.0, "clamped");
-    }
-
-    // Constant on purpose: this test locks the tuning invariant.
-    #[allow(clippy::assertions_on_constants)]
-    #[test]
-    fn bonus_chance_is_squared_and_capped() {
-        assert_eq!(bonus_fish_chance(0.0, 4_000.0), 0.0);
-        assert_eq!(bonus_fish_chance(4_000.0, 4_000.0), BONUS_FISH_MAX_CHANCE);
-        // Half the run held bold earns a quarter of the cap, not half.
-        assert_eq!(
-            bonus_fish_chance(2_000.0, 4_000.0),
-            0.25 * BONUS_FISH_MAX_CHANCE
-        );
-        assert!(bonus_fish_chance(3_200.0, 4_000.0) < 0.7 * BONUS_FISH_MAX_CHANCE);
-        assert!(
-            BONUS_FISH_MAX_CHANCE <= 0.3,
-            "a bonus, not a second supply line"
-        );
     }
 
     #[test]

@@ -138,3 +138,5 @@
     - 재현: `blender -b --python-exit-code 1 -P tools/blender-scripts/build_horse_reins.py`.
       무게 0.5, 중첩 불가, 기본가 15000(1골드 50실버), Rica 판매. 사용 시 소모 없이 탑승·하차한다.
       말 모델은 [MAXDESIGN-3D의 Horse, CC BY 4.0](animals.md), 규칙은 [MOUNTS.md](../MOUNTS.md).
+
+- 대물 물고기 5종(`trophy_*`)은 위 Fishing icons의 같은 어종 아이콘을 재사용한다. 새 이미지 생성 없음 (2026-09-09).

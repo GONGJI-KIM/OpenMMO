@@ -50,31 +50,6 @@ describe('catchMessage', () => {
     )
   })
 
-  it('tells a bold fight its fish came doubled', () => {
-    expect(
-      catchMessage(
-        { name: 'Raw Trout', category: 'fish' },
-        'raw_trout',
-        34,
-        false,
-        true
-      )
-    ).toBe(
-      'You caught a Raw Trout (34 cm). Bold fight — a second one took the trailing hook!'
-    )
-    expect(
-      catchMessage(
-        { name: 'Golden Sturgeon', category: 'fish' },
-        'golden_sturgeon',
-        120,
-        true,
-        true
-      )
-    ).toBe(
-      'Trophy catch! Golden Sturgeon, 120 cm! Bold fight — a second one took the trailing hook!'
-    )
-  })
-
   it('picks the article by the leading vowel', () => {
     expect(
       catchMessage(

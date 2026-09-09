@@ -1000,11 +1000,12 @@ impl SharedState {
                 player_id,
                 fish_state,
                 tension_pct,
+                trophy,
                 ..
             } if self.self_player_id.as_ref() == Some(player_id) => {
                 // Same policy a practiced human plays from the gauge; answered
                 // only on change — a stance holds until replaced.
-                let stance = auto_stance(*fish_state, *tension_pct);
+                let stance = auto_stance(*fish_state, *tension_pct, *trophy);
                 if self.fishing_stance != Some(stance)
                     && self.react_fishing(stance, STANCE_REACTION_MS)
                 {

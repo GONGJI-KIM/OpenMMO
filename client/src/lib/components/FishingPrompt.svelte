@@ -10,12 +10,12 @@
   import { networkManager } from '../network/socket'
   import { playFishingSound } from '../managers/sfxManager'
   import { isTypingTarget } from '../utils/dom'
-  import { fishing_tension_bold } from '../wasm/onlinerpg_shared'
+  import { fishing_trophy_min_tension } from '../wasm/onlinerpg_shared'
 
   type FightStance = Exclude<FishingAction, 'hook'>
 
   const WHEEL_BURST_MS = 350
-  const TENSION_BOLD = fishing_tension_bold()
+  const TROPHY_MIN_TENSION = fishing_trophy_min_tension()
 
   const STANCE_BUTTONS = [
     { stance: 'reel', label: 'REEL IN', hint: 'hold · SPACE · wheel ↓' },
@@ -143,10 +143,15 @@
 {:else if $myFishing.phase === 'fight'}
   {@const f = $myFishing.fight}
   {@const bold =
-    f.fishState === 'running' && f.tension >= TENSION_BOLD && f.tension < 85}
+    f.trophy && f.fishState === 'running' && f.tension >= TROPHY_MIN_TENSION}
   <div class="fight-panel">
+    {#if f.trophy}<div class="trophy-label">TROPHY FISH</div>{/if}
     {#if bold}
-      <div class="fish-state bold">Bold! Hold it here — it tires fastest.</div>
+      <div class="fish-state bold">Good tension — the trophy is tiring!</div>
+    {:else if f.trophy && f.fishState === 'running'}
+      <div class="fish-state running">
+        Keep tension above {TROPHY_MIN_TENSION} to tire it!
+      </div>
     {:else if f.fishState === 'running'}
       <div class="fish-state running">The fish runs — watch the tension!</div>
     {:else if f.fishState === 'resting'}
@@ -170,13 +175,16 @@
         class:tension-high={f.tension >= 85}
         style={`width: ${Math.min(100, f.tension)}%`}
       ></span>
-      <span
-        class="bold-mark"
-        class:lit={bold}
-        style={`left: ${TENSION_BOLD}%`}
-        title="Bold line: a running fish held past here earns a bonus-fish chance"
-      ></span>
+      {#if f.trophy}
+        <span
+          class="bold-mark"
+          class:lit={bold}
+          style={`left: ${TROPHY_MIN_TENSION}%`}
+          title="Trophy fish only tire above this line while running"
+        ></span>
+      {/if}
     </div>
+    <div class="stamina-label">Stamina: {f.stamina}%</div>
     <div class="stance-row">
       {#each STANCE_BUTTONS as b (b.stance)}
         <button
@@ -253,6 +261,15 @@
   .fish-state.running {
     color: #f2a65e;
     animation: state-pulse 0.4s ease-in-out infinite alternate;
+  }
+
+  .trophy-label {
+    color: #ffd766;
+    font-weight: bold;
+  }
+  .stamina-label {
+    color: #b9dfc6;
+    font-size: 12px;
   }
 
   .fish-state.bold {

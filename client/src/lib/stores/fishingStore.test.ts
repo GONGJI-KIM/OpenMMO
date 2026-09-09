@@ -19,6 +19,7 @@ function fight(overrides: Partial<FightStatus> = {}): FightStatus {
     fishState: 'running',
     tension: 50,
     stamina: 80,
+    trophy: false,
     ...overrides,
   }
 }
@@ -39,7 +40,21 @@ describe('myFishing transitions', () => {
 
     expect(get(myFishing)).toEqual({
       phase: 'fight',
-      fight: { fishState: 'running', tension: 20, stamina: 100 },
+      fight: { fishState: 'running', tension: 20, stamina: 100, trophy: false },
+    })
+  })
+
+  it('keeps the pre-rolled trophy flag through exhaustion', () => {
+    myFishing.set({ phase: 'bite' })
+    applyFightUpdate('running', 30, 100, true)
+    expect(get(myFishing)).toEqual({
+      phase: 'fight',
+      fight: { fishState: 'running', tension: 30, stamina: 100, trophy: true },
+    })
+    applyFightUpdate('exhausted', 50, 0, true)
+    expect(get(myFishing)).toEqual({
+      phase: 'fight',
+      fight: { fishState: 'exhausted', tension: 50, stamina: 0, trophy: true },
     })
   })
 
@@ -50,7 +65,7 @@ describe('myFishing transitions', () => {
 
     expect(get(myFishing)).toEqual({
       phase: 'fight',
-      fight: { fishState: 'exhausted', tension: 30, stamina: 0 },
+      fight: { fishState: 'exhausted', tension: 30, stamina: 0, trophy: false },
     })
   })
 
