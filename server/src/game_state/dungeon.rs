@@ -27,7 +27,13 @@ use crate::types::PlayerId;
 use super::monster::Handoff;
 use super::GameState;
 
-const MONSTER_RESPAWN_MS: u64 = 5 * 60 * 1000;
+const MONSTER_RESPAWN_MS_BY_PLAYER_COUNT: [u64; 5] = [
+    5 * 60 * 1000,
+    4 * 60 * 1000,
+    3 * 60 * 1000,
+    150 * 1000,
+    2 * 60 * 1000,
+];
 /// Held until `reset_dungeons`: one guardian per night.
 pub(super) const BOSS_RESPAWN_NEVER: u64 = u64::MAX;
 /// Per-kill chance that a monster in the section above a locked floor drops
@@ -154,6 +160,15 @@ pub(super) struct DungeonMonsterRef {
     pub is_boss: bool,
 }
 
+fn monster_respawn_ms(player_count: usize) -> u64 {
+    MONSTER_RESPAWN_MS_BY_PLAYER_COUNT[player_count.saturating_sub(1).min(4)]
+}
+
+fn dungeon_depth_band(depth: u8) -> std::ops::RangeInclusive<u8> {
+    let start = ((depth - 1) / 5) * 5 + 1;
+    start..=start + 4
+}
+
 fn prop_wall_opposite_dir(layout: &FloorLayout, x: i32, z: i32) -> (i32, i32) {
     // Pick the adjacent wall the same way the client orients chest props
     // (N, S, W, E), then step toward the opposite/open side.
@@ -188,6 +203,24 @@ pub(super) fn door_line_dist_sq(entrance: &Position, seg: [i32; 4], pos: &Positi
 }
 
 impl GameState {
+    async fn dungeon_band_population(&self, entrance_id: &str, depth: u8) -> usize {
+        let occupants: HashSet<PlayerId> = {
+            let dungeons = self.dungeons.read().await;
+            let Some(rt) = dungeons.get(entrance_id) else {
+                return 0;
+            };
+            dungeon_depth_band(depth)
+                .filter_map(|depth| rt.floors.get(&depth))
+                .flat_map(|floor| floor.players.keys().copied())
+                .collect()
+        };
+        let players = self.players.read().await;
+        occupants
+            .iter()
+            .filter(|id| players.get(id).is_some_and(|player| player.health > 0))
+            .count()
+    }
+
     /// Lazily generate and cache the layouts for a dungeon.
     pub(super) async fn ensure_dungeon_runtime(&self, entrance_id: &str) {
         {
@@ -1592,6 +1625,14 @@ impl GameState {
             index.remove(monster_id)
         };
         let entry = entry?;
+        let respawn_ms = if entry.is_boss {
+            BOSS_RESPAWN_NEVER
+        } else {
+            monster_respawn_ms(
+                self.dungeon_band_population(&entry.entrance_id, entry.depth)
+                    .await,
+            )
+        };
         let now = Self::now_ms();
 
         let total = {
@@ -1601,9 +1642,9 @@ impl GameState {
             let slot = rt.floors.get_mut(&entry.depth)?.slots.get_mut(entry.slot)?;
             slot.alive_monster_id = None;
             slot.respawn_at_ms = if entry.is_boss {
-                BOSS_RESPAWN_NEVER
+                respawn_ms
             } else {
-                now + MONSTER_RESPAWN_MS
+                now + respawn_ms
             };
             total
         };
