@@ -4,11 +4,6 @@ import { assetUrl } from '../utils/assetUrl'
 
 const bgmSrc = (file: string) => assetUrl(`/bgm/${file}`)
 
-const BATTLE_CACHE_BYTES = 48 * 1024 * 1024
-const battleBlobs = new Map<string, Blob>()
-const battleDownloads = new Map<string, Promise<Blob | null>>()
-let battleCacheBytes = 0
-
 async function fetchBgmBlob(file: string): Promise<Blob | null> {
   try {
     const res = await fetch(bgmSrc(file))
@@ -18,37 +13,9 @@ async function fetchBgmBlob(file: string): Promise<Blob | null> {
   }
 }
 
-function loadBattleBlob(file: string): Promise<Blob | null> {
-  const cached = battleBlobs.get(file)
-  if (cached) {
-    battleBlobs.delete(file)
-    battleBlobs.set(file, cached)
-    return Promise.resolve(cached)
-  }
-  const pending = battleDownloads.get(file)
-  if (pending) return pending
-  const download = fetchBgmBlob(file).then((blob) => {
-    battleDownloads.delete(file)
-    if (blob && !disposed && blob.size <= BATTLE_CACHE_BYTES) {
-      for (const [oldFile, oldBlob] of battleBlobs) {
-        if (battleCacheBytes + blob.size <= BATTLE_CACHE_BYTES) break
-        battleBlobs.delete(oldFile)
-        battleCacheBytes -= oldBlob.size
-      }
-      battleBlobs.set(file, blob)
-      battleCacheBytes += blob.size
-    }
-    return blob
-  })
-  battleDownloads.set(file, download)
-  return download
-}
-
-// Whole-file fetch avoids Range requests; battle blobs also survive HTTP cache misses.
+// Fetch whole tracks through the shared asset cache before playback.
 async function loadBgmSrc(file: string): Promise<string> {
-  const blob = await (BATTLE_BGM_FILES.includes(file)
-    ? loadBattleBlob(file)
-    : fetchBgmBlob(file))
+  const blob = await fetchBgmBlob(file)
   return blob ? URL.createObjectURL(blob) : bgmSrc(file)
 }
 
@@ -717,9 +684,6 @@ const unsubscribeMuted = bgmMuted.subscribe((m) => {
 
 export function disposeBgm() {
   disposed = true
-  battleBlobs.clear()
-  battleDownloads.clear()
-  battleCacheBytes = 0
   battleFile = null
   started = false
   unsubscribeVolume()

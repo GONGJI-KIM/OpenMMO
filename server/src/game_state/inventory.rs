@@ -1,5 +1,5 @@
 use crate::auth::{AuthService, ItemRow};
-use crate::item_defs::UseEffect;
+use crate::item_defs::{AuthenticatedUseAction, UseEffect};
 use crate::types::{PlayerId, ServerMessage};
 use onlinerpg_shared::inventory::{EquipSlot, GroundItem, ItemInstance, PlayerInventory};
 use onlinerpg_shared::messages::BagLineItem;
@@ -763,6 +763,22 @@ impl super::GameState {
         self.abort_fishing_if_rod_lost(player_id).await;
     }
 
+    pub async fn authenticated_use_action(
+        &self,
+        player_id: &PlayerId,
+        instance_id: u64,
+    ) -> Option<AuthenticatedUseAction> {
+        let inventories = self.inventories.read().await;
+        let item = inventories
+            .get(player_id)?
+            .bag
+            .iter()
+            .find(|item| item.instance_id == instance_id && item.quantity > 0)?;
+        self.item_defs
+            .get(&item.item_def_id)?
+            .authenticated_use_action
+    }
+
     /// Use a consumable from the bag: resolve its effect and dispatch to the
     /// matching handler (healing potion, return scroll, ...).
     pub async fn use_item(&self, player_id: &PlayerId, instance_id: u64) {
@@ -804,6 +820,7 @@ impl super::GameState {
         };
 
         match effect {
+            UseEffect::ToggleMount => self.toggle_horse_mount(player_id).await,
             UseEffect::Heal(dice) => self.use_healing_item(player_id, instance_id, &dice).await,
             UseEffect::Eat(eat) => self.use_eat_item(player_id, instance_id, &eat, None).await,
             UseEffect::PlaceCampfire => self.use_campfire_kit(player_id, instance_id).await,
@@ -835,6 +852,10 @@ impl super::GameState {
             }
             UseEffect::ReviveInPlace(hp_percent) => {
                 self.use_phoenix_talisman(player_id, instance_id, hp_percent)
+                    .await
+            }
+            UseEffect::PlaceHouse => {
+                self.send_system_message(player_id, "Use this scroll again to place its house.")
                     .await
             }
         }

@@ -48,6 +48,7 @@ export interface PassabilityGrid {
 export interface HouseData {
   id: string
   ownerId: string
+  sourceScrollId?: string | null
   origin: { x: number; y: number; z: number }
   rooms: RoomData[]
   passability?: PassabilityGrid[]

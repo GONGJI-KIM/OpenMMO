@@ -20,6 +20,7 @@ export type OverlayId =
   | 'tipHat'
   | 'capeDye'
   | 'landClaim'
+  | 'houseDemolition'
   | 'capeTexture'
   | 'chatChannelMenu'
   | 'socialMenu'
@@ -44,6 +45,7 @@ const OVERLAYS: Record<OverlayId, { layer: number; close?: () => void }> = {
   tipHat: { layer: 3 },
   capeDye: { layer: 3 },
   landClaim: { layer: 3 },
+  houseDemolition: { layer: 3 },
   capeTexture: { layer: 3 },
   worldMap: { layer: 4 },
   settings: { layer: 5 },

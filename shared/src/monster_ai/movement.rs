@@ -306,9 +306,11 @@ impl MonsterBrain {
         range: Option<f32>,
     ) -> (bool, bool) {
         let before = self.position;
+        let waypoint_idx = self.current_waypoint_idx;
+        let pending_bend_sync = self.pending_bend_sync;
         let range = range.unwrap_or(0.0);
         let outside = before.dist_xz_sq(&target) > range * range;
-        let result = self.follow_path_gated(delta_ms, true);
+        let mut result = self.follow_path_gated(delta_ms, true);
         if outside && self.position.dist_xz_sq(&target) <= range * range {
             let dx = shortest_world_delta_x(before.x, self.position.x);
             let dz = self.position.z - before.z;
@@ -323,6 +325,12 @@ impl MonsterBrain {
             {
                 self.position.x = wrap_world_x(before.x + dx / dist * d);
                 self.position.z = before.z + dz / dist * d;
+                if d < dist && self.current_waypoint_idx != waypoint_idx {
+                    // The clamp stopped before the waypoint that was snapped.
+                    self.current_waypoint_idx = waypoint_idx;
+                    self.pending_bend_sync = pending_bend_sync;
+                    result.0 = false;
+                }
             }
         }
         result

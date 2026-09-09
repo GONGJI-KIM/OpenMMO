@@ -508,6 +508,7 @@
   <PlayerModel
     bind:this={currentPlayerModel}
     position={currentPlayer.position}
+    mounted={currentPlayer.mounted}
     name={currentPlayer.name}
     title={currentPlayer.title}
     isCurrentPlayer={true}
@@ -583,6 +584,7 @@
         health={player.health}
         maxHealth={player.maxHealth}
         torchOn={player.torchOn}
+        mounted={player.mounted}
         mainHand={player.mainHand}
         back={player.back}
         backColor={player.backColor}

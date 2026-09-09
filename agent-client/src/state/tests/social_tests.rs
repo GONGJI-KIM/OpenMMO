@@ -5,14 +5,25 @@ use super::*;
 #[test]
 fn chat_history_stamps_and_caps() {
     let (mut s, _rx) = test_state();
-    s.push_chat_history("[Chat] jake1: hello");
+    let chat = |message: String| ServerMessage::ChatMessage {
+        player_id: PlayerId::from(2),
+        message,
+    };
+    let mut player = test_player(0.0, 0.0);
+    player.id = PlayerId::from(2);
+    player.name = "jake1".into();
+    s.nearby_players.insert(player.id, player);
+    s.push_event(chat("hello".into()));
+    s.finish_conversation();
     assert_eq!(s.chat_history()[0], "[Chat] jake1: hello");
 
     s.game_hour = Some(20);
     s.game_minute = Some(26);
     for i in 0..40 {
-        s.push_chat_history(&format!("[Chat] jake1: line {i}"));
+        s.push_event(chat(format!("line {i}")));
     }
+    assert_eq!(s.pending_chat().len(), 30);
+    s.finish_conversation();
     assert_eq!(s.chat_history().len(), 30, "capped at MAX_CHAT_HISTORY");
     assert_eq!(s.chat_history()[0], "[20:26] [Chat] jake1: line 10");
     assert_eq!(s.chat_history()[29], "[20:26] [Chat] jake1: line 39");

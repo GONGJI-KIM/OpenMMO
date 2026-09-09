@@ -77,6 +77,7 @@
 - land_deed.glb / land_deed.png — Meshy.ai Image to 3D (2026-09-05, "Blackridge Estate Dee…" — 다운로드 파일명 기준). 원본은 `assets/land_deed/Meshy_AI_Blackridge_Estate_Dee_0905071232_texture.glb`, 작업 파일은 `assets/land_deed/land_deed.blend`. [export_item_asset.py](../../tools/blender-scripts/export_item_asset.py)를 Blender 5.2.0 LTS에서 실행해 문양이 위를 향하도록 눕히고 긴 변을 기존 scroll.glb와 같은 0.50m로 스케일 적용했다. 최종 W×H×D는 0.325×0.104×0.500m, 원점=바닥 중심, 회전 0·스케일 1, 텍스처 3장(baseColor·metallicRoughness·normal) 512² WebP q90, emissive 0, GLB 약 177KB. 아이콘은 Cycles 직교 사선 렌더 512²→128², 투명 배경(2026-09-05); 512² 렌더는 `assets/land_deed/land_deed-render.png`. Land Deed의 공용 두루마리 표현을 교체하며 기존 scroll.glb·scroll_of_return.png는 다른 주문서에서 계속 사용한다. 라이선스: Meshy 생성물 약관 적용, 이번 생성의 요금제·권리 조건은 미확인.
     - 원화는 사용자가 제공한 ChatGPT 생성 이미지(2026-09-05, 요금제 미확인, ChatGPT 생성물 약관 적용). `assets/ChatGPT Image 2026년 9월 5일 오후 03_10_38.png`를 원본 해상도 그대로 이동했다. ![원화](../images/items/land_deed.png)
 - scroll_of_party_summon.png — scroll_of_return.png의 hue-rotation 파생 (스크립트, 2026-07-31): 붉은 봉인·장식 → 보라. 3D는 기존 scroll.glb 재사용
+- scroll_of_estate_return — 기존 `scroll_of_return.png`·`scroll.glb` 재사용 (2026-09-08). 새로 생성한 에셋은 없으며 출처·라이선스는 기존 스크롤 항목을 따른다.
 - scroll_of_enchant_armor.png — scroll_of_enchant_weapon.png의 hue-rotation 파생 (스크립트, 2026-08-15): 파란 봉인 → 초록. 3D는 같은 색 변환을 적용한 scroll_enchant_armor.glb (doc/assets/props.md의 scroll 항목 참조)
 - Hunger icons — 자체 제작 프로시저럴 플레이스홀더 (PIL 스크립트, 2026-08-02, 512² 드로잉→128² 다운스케일, 라이선스 문제 없음). 처음 9개를 만들었고, 남은 플레이스홀더는 grilled_minnow.png, grilled_perch.png, grilled_trout.png, grilled_salmon.png, grilled_sturgeon.png 5개다. 기존 ChatGPT 아이콘 스타일과 다르므로 추후 AI 아이콘으로 교체 예정
     - 교체 완료: apple.png(2026-08-03), bread.png·jerky.png(2026-08-04) — 각 모델의 Cycles 렌더. cheese.png는 cheese_wedge.png로 대체되고 삭제됨
@@ -127,3 +128,13 @@
     - 추가 조경 견본집 7종은 기존 `scroll.glb`와 `scroll_of_return.png`를 재사용한다 (2026-09-06). 원본 출처·라이선스는 이 문서의 해당 스크롤 항목을 따른다. 새로 생성한 에셋은 없다.
     - Blender 재임포트로 크기·바닥 중앙 원점·스케일·삼각형 수·512² 텍스처 3장·발광 없음 확인. 128² 아이콘의 알파·테두리 여백과 두 크기 렌더를 확인했다. 로컬 게임 서버의 모델·아이콘 URL 응답은 각각 파일과 SHA-256이 일치한다. 원본 GLB·작업 blend·큰 렌더·게임 GLB를 Hugging Face에 업로드하고 원격 파일 해시 검증 후 assets.lock에 revision `47b18253aee7daaccd8efb10df8829b02ac8b006`을 기록했다 (2026-09-06).
     - 재현 명령: `blender -b --python-exit-code 1 -P tools/blender-scripts/export_item_asset.py -- --source assets/landscaping_toolbox/Meshy_AI__0906115517_texture.glb --name landscaping_toolbox --size 0.65 --size-axis x --icon-rotation -62 -25 -8 --exposure -0.5`
+- horse_reins.glb / horse_reins.png (고삐) — Blender에서 절차적으로 자체 제작, 2026-09-08.
+  외부 모델·텍스처·AI 생성물 없음. 프로젝트 자체 에셋으로 저장소 라이선스를 따른다.
+  가죽 고리 2개와 황동 링 2개, 폭 0.234 × 길이 0.307 × 높이 0.018m의 바닥에 놓인 자세.
+  텍스처 없는 PBR 재질, 스케일 1, 발광·애니메이션 없음.
+    - 모델 `client/public/models/objects/horse_reins.glb`, packed 작업 파일
+      `assets/horse_reins/horse_reins.blend`. Cycles 투명 직교 렌더 512²→128² RGBA 아이콘
+      `client/public/items/objects/horse_reins.png`. Blender 재임포트·아이콘 육안·로컬 URL 바이트 일치 확인.
+    - 재현: `blender -b --python-exit-code 1 -P tools/blender-scripts/build_horse_reins.py`.
+      무게 0.5, 중첩 불가, 기본가 15000(1골드 50실버), Rica 판매. 사용 시 소모 없이 탑승·하차한다.
+      말 모델은 [MAXDESIGN-3D의 Horse, CC BY 4.0](animals.md), 규칙은 [MOUNTS.md](../MOUNTS.md).

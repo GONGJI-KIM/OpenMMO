@@ -1,5 +1,23 @@
 use super::*;
 
+#[test]
+fn mounted_movement_waits_for_turning_before_the_next_leg() {
+    let (mut s, _rx) = test_state();
+    let mut me = test_player(0.0, 0.0);
+    me.rotation = 0.0;
+    s.self_player = Some(me.clone());
+    assert_eq!(s.mount_turn_delay_ms(std::f32::consts::PI), 0);
+    me.mounted = true;
+    s.self_player = Some(me);
+    assert_eq!(s.mount_turn_delay_ms(0.0), 0);
+    assert_eq!(s.mount_turn_delay_ms(std::f32::consts::FRAC_PI_2), 714);
+    assert_eq!(s.mount_turn_delay_ms(std::f32::consts::PI), 1227);
+
+    s.self_move_mult = 0.5;
+    assert_eq!(s.mount_turn_delay_ms(std::f32::consts::FRAC_PI_2), 827);
+    assert_eq!(s.mount_turn_delay_ms(std::f32::consts::PI), 1454);
+}
+
 /// A state with one of everything a `move` target can name, so the ladder
 /// is exercised against a populated world rather than an empty one.
 fn targetable_state() -> (SharedState, mpsc::Receiver<ClientMessage>) {

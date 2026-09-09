@@ -145,6 +145,41 @@ function packClip(name: string): THREE.AnimationClip {
 }
 
 describe('retargetAnimationsForCharacterModel', () => {
+  it.each([0, Math.PI / 2])(
+    'keeps a mounted character at its world position with rotation %s',
+    async (rotation) => {
+      const target = makeRig(1, 1.1)
+      const hips = target.getObjectByName('Hips')!
+      // GLB bones can be siblings of the skinned mesh.
+      target.add(hips)
+      const parent = new THREE.Group()
+      parent.position.set(1200, 50, 2300)
+      parent.rotation.y = rotation
+      parent.add(target)
+      parent.updateMatrixWorld(true)
+      const before = hips.getWorldPosition(new THREE.Vector3())
+      const source = makeRig(1)
+      const [clip] = await retargetAnimationsForCharacterModel(target, source, [
+        new THREE.AnimationClip(`ride-world-${rotation}`, 1, [
+          new THREE.VectorKeyframeTrack(
+            'Hips.position',
+            [0, 1],
+            [0, 0, 0, 0, 0, 0]
+          ),
+        ]),
+      ])
+      expect(hips.getWorldPosition(new THREE.Vector3())).toEqual(before)
+      const mixer = new THREE.AnimationMixer(target)
+      mixer.clipAction(clip).play()
+      mixer.update(0.1)
+      parent.updateMatrixWorld(true)
+      const mountedPosition = hips.getWorldPosition(new THREE.Vector3())
+      expect(mountedPosition.x).toBeCloseTo(1200, 5)
+      expect(mountedPosition.y).toBeCloseTo(50.1, 5)
+      expect(mountedPosition.z).toBeCloseTo(2300, 5)
+    }
+  )
+
   it('drops the source rig bone positions that stretch the limbs', async () => {
     const [clip] = await retargetAnimationsForCharacterModel(
       makeRig(1),

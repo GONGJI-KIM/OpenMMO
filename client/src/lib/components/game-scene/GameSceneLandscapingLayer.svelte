@@ -23,6 +23,7 @@
     ownsEstatePosition,
     snapBrushCoordinate,
     type LandscapingStroke,
+    type LandscapingTool,
   } from '../../terrain/landscaping'
   import { wrapWorldX, unwrapWorldXNear } from '../../terrain/world-wrap'
   import type { TerrainHeightManager } from '../../managers/terrainHeightManager'
@@ -60,11 +61,15 @@
   let canPaint = false
   const strokes = new LandscapingStrokes()
 
+  function isPaintTool(tool: LandscapingTool) {
+    return tool === 'Ground' || tool === 'Road'
+  }
+
   function updatePreview() {
     const mode = get(landscapingMode)
     if (
       !mode ||
-      mode.tool === 'Fence' ||
+      !isPaintTool(mode.tool) ||
       !cursor ||
       !player ||
       get(cameraRotationEnabled)
@@ -202,7 +207,7 @@
       const mode = get(landscapingMode)
       if (
         !mode ||
-        mode.tool === 'Fence' ||
+        !isPaintTool(mode.tool) ||
         event.button !== 0 ||
         get(cameraRotationEnabled)
       )

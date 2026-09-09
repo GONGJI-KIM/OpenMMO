@@ -23,7 +23,7 @@ async fn steward_sells_land_deeds_and_burns_the_purchase_gold() {
     game_state.open_shop(&buyer, &steward, true).await;
     match buyer_rx.try_recv().unwrap() {
         ServerMessage::ShopState { catalog, .. } => {
-            assert_eq!(catalog, vec!["land_deed"]);
+            assert_eq!(catalog, vec!["land_deed", "storage_chest"]);
         }
         other => panic!("Expected Aldwin's shop, got {other:?}"),
     }
@@ -57,7 +57,7 @@ async fn estate_architect_sells_landscaping_supplies() {
     game.add_player(make_npc("npc_estate_architect", "Rowan", 0.0, 0.0))
         .await;
     game.add_player(make_player("buyer", 1.0, 0.0)).await;
-    game.register_player_character(&buyer, 1, 0, attrs_with_cha(10), 20_000, None)
+    game.register_player_character(&buyer, 1, 0, attrs_with_cha(10), 2_000_000, None)
         .await;
     game.inventories
         .write()
@@ -67,6 +67,13 @@ async fn estate_architect_sells_landscaping_supplies() {
     game.open_shop(&buyer, &architect, true).await;
     let mut supplies = vec!["wooden_fence", onlinerpg_shared::landscaping::TOOLBOX_ITEM];
     supplies.extend(onlinerpg_shared::landscaping::PALETTE_ITEMS.map(|(_, id)| id));
+    supplies.extend([
+        "scroll_of_medium_two_story_house",
+        "scroll_of_small_house",
+        "scroll_of_small_two_story_house",
+        "scroll_of_large_two_story_house",
+        "scroll_of_medium_house",
+    ]);
     match rx.try_recv().unwrap() {
         ServerMessage::ShopState { catalog, .. } => {
             assert_eq!(catalog.len(), supplies.len());

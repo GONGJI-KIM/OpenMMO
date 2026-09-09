@@ -93,6 +93,11 @@
     mapEditorMode.subscribe((v) => (isEditorMode = v)),
     playerVisualFloorLevel.subscribe((v) => (currentFloor = v)),
     playerInsideHouseId.subscribe((v) => (currentHouseId = v)),
+    objectManager.onRegionChanged(({ rx, rz, data }) => {
+      if (rx === lastLoadedRegion.rx && rz === lastLoadedRegion.rz) {
+        currentObjectData.set(data)
+      }
+    }),
   ]
   onDestroy(() => unsubs.forEach((u) => u()))
 

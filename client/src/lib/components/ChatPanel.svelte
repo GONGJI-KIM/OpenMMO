@@ -22,6 +22,7 @@
     shouldFocusChatOnEnter,
   } from '../chat-input-keys'
   import { ChatHistory } from '../chat-history'
+  import { isChatAtBottom } from '../chat-scroll'
   import { mountOverlay } from '../stores/overlayStack'
   import { chatFocusRequest, chatDraftRequest } from '../stores/npcMenuStore'
   import {
@@ -34,6 +35,7 @@
     isTranslatorApiSupported,
   } from '../translation/chatTranslator'
   import { draggablePanel } from '../actions/draggablePanel'
+  import { instrumentPanelVisible } from '../stores/instrumentStore'
 
   type Tab = 'all' | 'party' | 'combat'
   const TRANSCRIPT_FADE_DELAY_MS = 20_000
@@ -184,17 +186,26 @@
   let fadeTimer: number | undefined
 
   let scrollFrame: number | undefined
+  let scrollTab: Tab = 'all'
 
-  // Coalesce scrolling into one layout read per frame.
-  $effect(() => {
+  // Measure before new rows change the scroll height.
+  $effect.pre(() => {
     if (collapsed) return
-    const len =
+    const tabChanged = scrollTab !== activeTab
+    scrollTab = activeTab
+    const messages =
       activeTab === 'all'
-        ? chatMessages.length
+        ? chatMessages
         : activeTab === 'party'
-          ? partyMessages.length
-          : combatMessages.length
-    if (!chatContainer || !len || scrollFrame !== undefined) return
+          ? partyMessages
+          : combatMessages
+    if (
+      !chatContainer ||
+      messages.length === 0 ||
+      scrollFrame !== undefined ||
+      (!tabChanged && !isChatAtBottom(chatContainer))
+    )
+      return
     scrollFrame = requestAnimationFrame(() => {
       scrollFrame = undefined
       if (!collapsed && chatContainer) {
@@ -309,6 +320,7 @@
   }
 
   function handleGlobalKeydown(event: KeyboardEvent) {
+    if ($instrumentPanelVisible) return
     if (event.isComposing || event.keyCode === 229) return
     // While typing, Escape is invisible to the overlay-stack handler
     // (it skips input targets), so close the menu here; no double-close.

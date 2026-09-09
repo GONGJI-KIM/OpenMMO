@@ -31,13 +31,14 @@ Per the repository owner's instruction, a commit request also authorizes the Hug
 3. Detect which project areas need checks.
 - If any file is under `client/`, run client checks in `client/`.
 - If files are under `tools/<tool-name>/`, run checks in each changed `tools/<tool-name>/`.
-- If any file is under `server/`, run server checks in `server/`.
+- If changes touch any Rust workspace member (`server/`, `shared/`, `terrain/`, `agent-client/`, `tools/terrain-gen/`), `data-src/`, `.cargo/`, Rust source files, Cargo manifests/lockfiles, or Rust toolchain configuration, run Rust checks from the repository root.
 
 4. Run quality checks.
 - Preferred path: run `./.codex/skills/codex-commit-agent/scripts/validate.sh`.
 - Equivalent manual checks:
   - `client/` and each changed `tools/<tool-name>/`: `npm run format`, `npm run lint`, `npm run check`
-  - `server/`: `cargo fmt`, `cargo check`
+  - Rust workspace: `cargo fmt --all`, `cargo check --workspace --locked`, `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- Clippy is required for Rust-related changes, including test targets. Use the CI command above; do not substitute `cargo check` or relax warning enforcement.
 - If a check fails, stop and report the failing command and actionable errors.
 
 5. Review commit contents.

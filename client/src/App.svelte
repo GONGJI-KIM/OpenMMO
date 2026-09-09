@@ -26,6 +26,7 @@
     qualityForOutcome,
     applyAutoQuality,
   } from './lib/stores/graphicsSettings'
+  import { instrumentPanelVisible } from './lib/stores/instrumentStore'
 
   let showSettings = $state(false)
 
@@ -88,6 +89,7 @@
   // Edge's own Ctrl+M tab mute. `code` keeps it working under the Korean IME;
   // Shift is excluded so the browser keeps Ctrl+Shift+M (profile menu).
   function handleKeydown(event: KeyboardEvent) {
+    if ($instrumentPanelVisible) return
     if (event.ctrlKey && !event.shiftKey && event.code === 'KeyM') {
       event.preventDefault()
       bgmMuted.update((m) => !m)

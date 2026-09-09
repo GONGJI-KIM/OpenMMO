@@ -7,6 +7,7 @@ use crate::game_state::{
     KickNotice,
 };
 use crate::google_auth::GoogleAuthVerifier;
+use crate::item_defs::AuthenticatedUseAction;
 use crate::types::{
     new_player, Character, CharacterAttributes, CharacterClass, ClientKind, ClientMessage,
     PlayerId, Position, ServerMessage,
@@ -1339,6 +1340,20 @@ async fn handle_client_message(
             return Ok(responses);
         }
 
+        ClientMessage::PlayerMountTurn {
+            rotation,
+            stop,
+            sprinting,
+        } => {
+            if let Some(id) = &state.player_id {
+                if stop {
+                    game_state.stop_horse(id).await;
+                } else {
+                    game_state.turn_horse(id, rotation, sprinting).await;
+                }
+            }
+        }
+
         ClientMessage::PlayerMove {
             position,
             rotation,
@@ -1663,16 +1678,26 @@ async fn handle_client_message(
             );
         }
 
-        ClientMessage::PlaceHouse { .. } => {
-            warn!("Ignoring client-side PlaceHouse broadcast request; use the housing REST API");
+        ClientMessage::PlaceHouse {
+            instance_id,
+            origin,
+            quarter_turns,
+        } => {
+            if let Some(id) = &state.player_id {
+                game_state
+                    .place_house(id, instance_id, origin, quarter_turns, auth_service)
+                    .await;
+            }
         }
 
         ClientMessage::ModifyRoom { .. } => {
             // TODO: room modification broadcast
         }
 
-        ClientMessage::RemoveHouse { .. } => {
-            warn!("Ignoring client-side RemoveHouse broadcast request; use the housing REST API");
+        ClientMessage::RemoveHouse { house_id } => {
+            if let Some(id) = &state.player_id {
+                game_state.demolish_house(id, house_id, auth_service).await;
+            }
         }
 
         ClientMessage::ToggleDoor {
@@ -1753,17 +1778,43 @@ async fn handle_client_message(
 
         ClientMessage::UseItem { instance_id } => {
             if let Some(id) = &state.player_id {
-                if !game_state
-                    .try_use_landscaping_item(id, instance_id, auth_service, state.is_admin)
-                    .await
-                    && !game_state
-                        .try_start_fence_mode(id, instance_id, auth_service)
-                        .await
-                    && !game_state
-                        .try_preview_land_claim(id, instance_id, auth_service)
-                        .await
-                {
-                    game_state.use_item(id, instance_id).await;
+                match game_state.authenticated_use_action(id, instance_id).await {
+                    Some(AuthenticatedUseAction::EstateReturn) => {
+                        game_state
+                            .use_estate_return_scroll(id, instance_id, auth_service)
+                            .await;
+                    }
+                    Some(AuthenticatedUseAction::EstateStorage) => {
+                        game_state
+                            .try_start_estate_chest_mode(id, instance_id, auth_service)
+                            .await;
+                    }
+                    Some(AuthenticatedUseAction::EstateFence) => {
+                        game_state
+                            .try_start_fence_mode(id, instance_id, auth_service)
+                            .await;
+                    }
+                    Some(AuthenticatedUseAction::LandClaim) => {
+                        game_state
+                            .try_preview_land_claim(id, instance_id, auth_service)
+                            .await;
+                    }
+                    None => {
+                        if !game_state
+                            .try_start_house_placement(id, instance_id, auth_service)
+                            .await
+                            && !game_state
+                                .try_use_landscaping_item(
+                                    id,
+                                    instance_id,
+                                    auth_service,
+                                    state.is_admin,
+                                )
+                                .await
+                        {
+                            game_state.use_item(id, instance_id).await;
+                        }
+                    }
                 }
             }
         }
@@ -1793,19 +1844,28 @@ async fn handle_client_message(
                     .await;
             }
         }
-        ClientMessage::StartFenceMode => {
-            if let Some(id) = &state.player_id {
-                game_state.start_fence_mode(id, auth_service).await;
-            }
-        }
-        ClientMessage::StartLandscapingMode => {
+        ClientMessage::StartLandscapingMode { tool } => {
             if let Some(id) = &state.player_id {
                 game_state
-                    .start_landscaping_mode(
+                    .start_landscaping_mode(id, auth_service, tool, state.is_admin)
+                    .await;
+            }
+        }
+        ClientMessage::PlaceEstateChest {
+            instance_id,
+            position,
+            rotation_deg,
+            floor_level,
+        } => {
+            if let Some(id) = &state.player_id {
+                game_state
+                    .place_estate_chest(
                         id,
+                        instance_id,
+                        position,
+                        rotation_deg,
+                        floor_level,
                         auth_service,
-                        onlinerpg_shared::landscaping::LandscapingTool::Ground,
-                        state.is_admin,
                     )
                     .await;
             }
@@ -1814,6 +1874,39 @@ async fn handle_client_message(
             if let Some(id) = &state.player_id {
                 game_state
                     .edit_landscape(id, stroke, auth_service, state.is_admin)
+                    .await;
+            }
+        }
+        ClientMessage::OpenEstateChest { chest_id } => {
+            if let Some(id) = &state.player_id {
+                game_state
+                    .open_estate_chest(id, chest_id, auth_service)
+                    .await;
+            }
+        }
+        ClientMessage::TransferEstateItems {
+            chest_id,
+            deposits,
+            withdrawals,
+            expected_revision,
+        } => {
+            if let Some(id) = &state.player_id {
+                game_state
+                    .transfer_estate_items(
+                        id,
+                        chest_id,
+                        deposits,
+                        withdrawals,
+                        expected_revision,
+                        auth_service,
+                    )
+                    .await;
+            }
+        }
+        ClientMessage::RecoverEstateChest { chest_id } => {
+            if let Some(id) = &state.player_id {
+                game_state
+                    .recover_estate_chest(id, chest_id, auth_service)
                     .await;
             }
         }

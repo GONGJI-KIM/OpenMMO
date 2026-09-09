@@ -1,4 +1,4 @@
-// Common movement calculation utilities shared between local and remote players
+import { moveHorse } from './horseMovement'
 
 import {
   shortestWrappedDeltaX,
@@ -32,6 +32,7 @@ export function positionShortOfTarget(
 }
 
 export interface MovementConfig {
+  mountRotation?: number
   maxSpeed: number
   acceleration: number
   deceleration: number
@@ -46,6 +47,7 @@ export interface MovementState {
 }
 
 export interface MovementResult {
+  mountSteps?: { position: Position; rotation: number }[]
   newPos: Position
   newSpeed: number
   rotation: number
@@ -143,6 +145,7 @@ export const DEFAULT_MOVEMENT_CONFIG: MovementConfig = {
 
 // Mirrors shared/src/hunger.rs SPRINT_MOVE_MULT.
 export const SPRINT_SPEED_MULT = 1.5
+export const HORSE_MOVE_MULT = 3
 
 export function scaleMovementConfig(
   config: MovementConfig,
@@ -180,6 +183,16 @@ export function calculateMovementStep(
   config: MovementConfig,
   deltaTimeSeconds: number
 ): MovementResult {
+  if (config.mountRotation !== undefined) {
+    return moveHorse(
+      currentPos,
+      config.mountRotation,
+      config.maxSpeed,
+      deltaTimeSeconds,
+      movement.targetPos,
+      config.arrivalThreshold
+    )
+  }
   const { targetPos, totalDistance } = movement
   const accelDistance = getAccelDistance(config)
   const decelDistance = getDecelDistance(config)

@@ -60,10 +60,11 @@ use tokio::sync::{mpsc, Notify};
 
 pub(crate) use onlinerpg_shared::messages::MUSIC_EMOTE;
 
+pub(crate) const DEFAULT_ATTACK_COOLDOWN: std::time::Duration =
+    std::time::Duration::from_millis(1500);
+
 const MAX_EVENTS: usize = 200;
-/// Rolling window of conversation lines kept as prompt context. Stateless
-/// backends (one ephemeral Codex thread per prompt) see only this window, so
-/// it is the NPC's entire short-term memory of who said what.
+/// Separate caps for previous context and newly heard conversation.
 const MAX_CHAT_HISTORY: usize = 30;
 /// How many of our own recent song titles the world state lists, so a bard
 /// can favor tunes it has not played lately.
@@ -307,9 +308,10 @@ pub struct SharedState {
     /// its hands, since an offer only reaches items in the bag.
     pub keepsake_ids: Vec<String>,
     events: Vec<ServerMessage>,
-    /// Conversation lines already shown to (or heard while asleep by) the
-    /// LLM, kept as the RECENT CONVERSATION prompt section (`MAX_CHAT_HISTORY`).
+    /// Previously consumed conversation context.
     chat_history: VecDeque<String>,
+    pending_chat: VecDeque<String>,
+    pub queued_llm_priority: Option<crate::llm_scheduler::RequestPriority>,
     /// Titles of our own recent performances, oldest first (`MAX_RECENT_SONGS`).
     recent_songs: VecDeque<String>,
     /// Accumulated per-player favor, keyed by canonical display name. Fed by
@@ -407,6 +409,8 @@ pub struct SharedState {
     /// rather than sending us back to a chest that has nothing for us.
     treasure_chests_spent: HashSet<String>,
     cmd_tx: mpsc::Sender<ClientMessage>,
+    pub attack_cooldown: std::time::Duration,
+    last_player_attack_at: Option<tokio::time::Instant>,
     /// Notified when an urgent event arrives
     pub urgent_notify: Arc<Notify>,
     /// Monster AI manager for server-assigned monsters
@@ -471,6 +475,8 @@ impl SharedState {
             keepsake_ids: Vec::new(),
             events: Vec::new(),
             chat_history: VecDeque::new(),
+            pending_chat: VecDeque::new(),
+            queued_llm_priority: None,
             recent_songs: VecDeque::new(),
             favor: BTreeMap::new(),
             latest_monster_moves: HashMap::new(),
@@ -508,6 +514,8 @@ impl SharedState {
             pending_chest_open: None,
             treasure_chests_spent: HashSet::new(),
             cmd_tx,
+            attack_cooldown: DEFAULT_ATTACK_COOLDOWN,
+            last_player_attack_at: None,
             urgent_notify: Arc::new(Notify::new()),
             monster_ai: MonsterAiManager::new(),
             pending_commands: Vec::new(),

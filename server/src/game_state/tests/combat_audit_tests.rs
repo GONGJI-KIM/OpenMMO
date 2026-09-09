@@ -203,3 +203,64 @@ async fn combat_audit_reloads_targets_only_every_ten_minutes() {
     assert_eq!(rows[0]["monsters"]["unknown"]["server_attempts"], 1);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[tokio::test]
+async fn combat_audit_records_player_attack_decisions_and_shared_cooldown() {
+    let game = make_test_game_state("audit_player_attacks");
+    let dir = crate::test_util::unique_temp_dir("audit_player_attacks");
+    config(&dir, &[6229]);
+    game.tick_combat_audit(dir.clone(), 30, false).await;
+    let id = tracked_player(&game, "watched", 6229, 10).await;
+    let other = tracked_player(&game, "other", 6230, 10).await;
+    let position = game.players.read().await[&id].position;
+    for name in ["first", "second"] {
+        let mut monster = make_monster(name, position, 0);
+        monster.health = 100_000;
+        game.monsters.write().await.insert(name.into(), monster);
+    }
+    game.player_attack(&id, "missing".into(), None).await;
+    assert!(!game.last_player_attacks.read().await.contains_key(&id));
+    game.player_attack(&id, "first".into(), None).await;
+    let first_accepted = game.last_player_attacks.read().await[&id];
+    game.player_attack(&id, "second".into(), None).await;
+    assert_eq!(game.last_player_attacks.read().await[&id], first_accepted);
+    game.last_player_attacks.write().await.insert(
+        id,
+        GameState::now_ms() - *super::combat::PLAYER_ATTACK_INTERVAL_MS,
+    );
+    game.player_attack(&id, "second".into(), None).await;
+    game.player_attack(&other, "missing".into(), None).await;
+    game.tick_combat_audit(dir.clone(), 30, true).await;
+    let rows = rows(&dir);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["schema"], 2);
+    let attacks = &rows[0]["player_attacks"];
+    assert_eq!(attacks["requests"], 4);
+    assert_eq!(attacks["outcomes"]["accepted"], 2);
+    assert_eq!(attacks["outcomes"]["cooldown"], 1);
+    assert_eq!(attacks["outcomes"]["invalid_target"], 1);
+    let events = attacks["events"].as_array().unwrap();
+    assert_eq!(events[0]["detail"], "absent from registry");
+    assert!(events[0]["cooldown"].is_null());
+    assert!(events[0]["request_interval_ms"].is_null());
+    assert!(events[1]["cooldown"]["since_accepted_ms"].is_null());
+    assert_eq!(events[2]["monster_id"], "second");
+    assert_eq!(events[2]["cooldown"]["accepted"], false);
+    for (i, event) in events.iter().enumerate().skip(1) {
+        assert_eq!(
+            event["request_interval_ms"].as_u64().unwrap(),
+            event["requested_at_ms"].as_u64().unwrap()
+                - events[i - 1]["requested_at_ms"].as_u64().unwrap()
+        );
+        let timing = &event["cooldown"];
+        let Some(elapsed) = timing["since_accepted_ms"].as_u64() else {
+            continue;
+        };
+        assert_eq!(
+            elapsed >= timing["checked_interval_ms"].as_u64().unwrap(),
+            timing["accepted"].as_bool().unwrap()
+        );
+    }
+    assert_eq!(attacks["dropped_events"], 0);
+    std::fs::remove_dir_all(dir).unwrap();
+}

@@ -640,8 +640,19 @@ export class HousingManager {
   }
 
   private addToCache(house: HouseData) {
-    this.housesById.set(house.id, house)
+    const previous = this.housesById.get(house.id)
     const key = this.chunkOf(house)
+    if (previous) {
+      const previousKey = this.chunkOf(previous)
+      if (previousKey !== key) {
+        const previousChunk = this.chunkCache.get(previousKey)
+        const previousIdx = previousChunk?.findIndex((h) => h.id === house.id)
+        if (previousChunk && previousIdx != null && previousIdx >= 0) {
+          previousChunk.splice(previousIdx, 1)
+        }
+      }
+    }
+    this.housesById.set(house.id, house)
     const chunk = this.chunkCache.get(key)
     if (chunk) {
       const idx = chunk.findIndex((h) => h.id === house.id)

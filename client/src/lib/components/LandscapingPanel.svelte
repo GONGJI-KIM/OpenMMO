@@ -8,6 +8,7 @@
     selectLandscapingTool,
   } from '../stores/landscapingStore'
   import {
+    fenceMode,
     fencePending,
     fenceError,
     fenceTarget,
@@ -15,67 +16,187 @@
     showFenceNoSpawnZones,
     stopFenceMode,
   } from '../stores/fenceStore'
+  import {
+    estateChestError,
+    estateChestMode,
+    estateChestPending,
+    stopEstateChestMode,
+  } from '../stores/estateStorageStore'
+  import { inventoryStore } from '../stores/inventoryStore'
+  import { estateStorageDefs } from '../data/estateFurnitureDefs'
+  import { getItemDef, itemDisplayName } from '../data/itemDefs'
+  import { playerVisualFloorLevel } from '../stores/housingStore'
+  import { networkManager } from '../network/socket'
   import type { LandscapingTool } from '../terrain/landscaping'
   import { isAdminUser } from '../stores/gameStore'
+  import { stopHouseInteraction } from '../stores/housePlacementStore'
+  import HousePlacementPanel from './HousePlacementPanel.svelte'
   import SplatBrushPanel from './map-editor/SplatBrushPanel.svelte'
   import { draggablePanel } from '../actions/draggablePanel'
 
-  const tabs: LandscapingTool[] = ['Ground', 'Road', 'Fence']
+  type EditorTab = Exclude<LandscapingTool, 'Fence'> | 'Objects'
+
+  const tabs: EditorTab[] = ['Ground', 'Road', 'Objects', 'House']
+  const editorOpen = $derived(
+    $landscapingMode !== null || $estateChestMode !== null
+  )
+  const activeTab = $derived<EditorTab>(
+    $estateChestMode || $landscapingMode?.tool === 'Fence'
+      ? 'Objects'
+      : ($landscapingMode?.tool ?? 'Objects')
+  )
+  const fenceDefinition = getItemDef('wooden_fence')
+  const storageObjects = $derived(
+    [...estateStorageDefs.values()].map((definition) => {
+      const items = $inventoryStore.bag.filter(
+        (item) => item.item_def_id === definition.itemDefId
+      )
+      return {
+        definition: getItemDef(definition.itemDefId),
+        itemDefId: definition.itemDefId,
+        instanceId: items[0]?.instance_id,
+        quantity: items.reduce((total, item) => total + item.quantity, 0),
+      }
+    })
+  )
+
+  function selectTab(tab: EditorTab) {
+    if (tab === activeTab) return
+    if (tab === 'Objects') {
+      selectFence()
+      return
+    }
+    if (tab !== 'House') {
+      stopHouseInteraction()
+    }
+    if ($estateChestMode) networkManager.sendStartLandscapingMode(tab)
+    else selectLandscapingTool(tab)
+  }
+
+  function selectFence() {
+    if ($fenceMode) return
+    stopHouseInteraction()
+    if ($landscapingMode) {
+      stopEstateChestMode()
+      selectLandscapingTool('Fence')
+    } else {
+      networkManager.sendStartLandscapingMode('Fence')
+    }
+  }
+
+  function selectStorage(instanceId: number | undefined) {
+    if (instanceId === undefined || $estateChestPending) return
+    stopHouseInteraction()
+    networkManager.sendUseItem(instanceId)
+  }
+
+  function close() {
+    stopHouseInteraction()
+    stopFenceMode()
+    stopEstateChestMode()
+  }
 </script>
 
-{#if $landscapingMode}
-  {@const status =
-    $landscapingMode.tool === 'Fence'
-      ? $fencePending
-        ? 'Saving…'
-        : ($fenceError ?? $fenceTarget?.reason)
-      : $landscapingPending
-        ? 'Saving…'
-        : ($landscapingError ?? $landscapingHint)}
+{#if editorOpen}
+  {@const status = $estateChestMode
+    ? $estateChestPending
+      ? 'Saving…'
+      : ($estateChestError ?? 'Point inside your estate and click to place')
+    : $landscapingMode?.tool === 'House'
+      ? null
+      : $landscapingMode?.tool === 'Fence'
+        ? $fencePending
+          ? 'Saving…'
+          : ($fenceError ?? $fenceTarget?.reason)
+        : $landscapingPending
+          ? 'Saving…'
+          : ($landscapingError ?? $landscapingHint)}
   <div class="landscaping-panel" use:draggablePanel={'landscaping'}>
     <div class="panel-header" data-drag-handle>
-      <strong>Estate Landscaping</strong>
+      <strong>Estate Editor</strong>
       <button
         class="close-btn"
-        aria-label="Close landscaping"
+        aria-label="Close estate editor"
         title="Close (Esc)"
-        onclick={stopFenceMode}>×</button
+        onclick={close}>×</button
       >
     </div>
-    <div class="tabs" role="tablist" aria-label="Landscaping tools">
+    <div class="tabs" role="tablist" aria-label="Estate editing tools">
       {#each tabs as tab (tab)}
         <button
           role="tab"
-          aria-selected={$landscapingMode.tool === tab}
-          class:active={$landscapingMode.tool === tab}
-          disabled={tab !== 'Fence' && !$hasLandscapingToolbox}
-          title={tab !== 'Fence' && !$hasLandscapingToolbox
-            ? "Carry a Landscaper's Toolbox to paint"
+          aria-selected={activeTab === tab}
+          class:active={activeTab === tab}
+          disabled={tab !== 'Objects' && !$hasLandscapingToolbox}
+          title={tab !== 'Objects' && !$hasLandscapingToolbox
+            ? "Carry a Landscaper's Toolbox to use this tool"
             : tab}
-          onclick={() => selectLandscapingTool(tab)}>{tab}</button
+          onclick={() => selectTab(tab)}>{tab}</button
         >
       {/each}
     </div>
-    {#if $landscapingMode.tool === 'Fence'}
-      <div class="fence-content">
-        <strong>Wooden Fence · {$fenceCount} in bag</strong>
-        {#if $isAdminUser}
+    {#if activeTab === 'House'}
+      <HousePlacementPanel />
+    {:else if activeTab === 'Objects'}
+      <div class="object-content">
+        <strong>Placeable Objects</strong>
+        <div class="object-list">
+          <button
+            class="object-row"
+            class:active={$fenceMode !== null}
+            title={$fenceCount
+              ? 'Place or recover fences'
+              : 'Select to recover placed fences'}
+            onclick={selectFence}
+          >
+            {#if fenceDefinition}
+              <img src="/items/{fenceDefinition.icon}" alt="" />
+            {/if}
+            <span>{itemDisplayName('wooden_fence')}</span>
+            <small>×{$fenceCount}</small>
+          </button>
+          {#each storageObjects as object (object.itemDefId)}
+            <button
+              class="object-row"
+              class:active={$estateChestMode?.item_def_id === object.itemDefId}
+              disabled={object.instanceId === undefined || $estateChestPending}
+              title={object.quantity
+                ? `Place ${itemDisplayName(object.itemDefId)}`
+                : 'None in your bag'}
+              onclick={() => selectStorage(object.instanceId)}
+            >
+              {#if object.definition}
+                <img src="/items/{object.definition.icon}" alt="" />
+              {/if}
+              <span>{itemDisplayName(object.itemDefId)}</span>
+              <small>×{object.quantity}</small>
+            </button>
+          {/each}
+        </div>
+        {#if $isAdminUser && $fenceMode}
           <label class="zone-toggle">
             <input type="checkbox" bind:checked={$showFenceNoSpawnZones} />
             Show no-spawn zones
           </label>
         {/if}
+        {#if $estateChestMode}
+          <small
+            >{$playerVisualFloorLevel + 1}F · Left-click to place · Right-click
+            to move · Mouse wheel rotates · Esc to finish</small
+          >
+        {:else if $fenceMode}
+          <small
+            >Left-click to place or recover · Right-click to move · Esc to
+            finish</small
+          >
+        {/if}
       </div>
     {:else}
       <SplatBrushPanel
-        sizeLabel={$landscapingMode.tool === 'Road' ? 'Width' : 'Size'}
-        title={$landscapingMode.tool === 'Ground'
-          ? 'Ground Brush'
-          : 'Road Tool'}
-        hint={$landscapingMode.tool === 'Ground'
-          ? '(drag to paint)'
-          : '(click two points)'}
-        availableLayers={$landscapingMode.palette}
+        sizeLabel={activeTab === 'Road' ? 'Width' : 'Size'}
+        title={activeTab === 'Ground' ? 'Ground Brush' : 'Road Tool'}
+        hint={activeTab === 'Ground' ? '(drag to paint)' : '(click two points)'}
+        availableLayers={$landscapingMode?.palette ?? []}
       />
     {/if}
     {#if status}
@@ -167,13 +288,39 @@
     border-radius: 0;
     box-shadow: none;
   }
-  .fence-content,
+  .object-content,
   .paint-status {
     display: grid;
     gap: 6px;
     padding: 12px 16px;
     font-family: 'Courier New', monospace;
     font-size: 12px;
+  }
+  .object-list {
+    display: grid;
+    gap: 5px;
+    min-width: 280px;
+  }
+  .object-row {
+    display: grid;
+    grid-template-columns: 28px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    text-align: left;
+  }
+  .object-row.active {
+    border-color: #e2b93b;
+    background: rgba(226, 185, 59, 0.2);
+  }
+  .object-row img {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
+  }
+  .object-row small,
+  .object-content > small {
+    color: #aaa;
   }
   .zone-toggle {
     display: flex;

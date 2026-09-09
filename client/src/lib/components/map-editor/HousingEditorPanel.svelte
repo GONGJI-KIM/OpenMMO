@@ -19,6 +19,7 @@
     deleteSelectedRoom,
     flattenSelectedRoomTerrain,
     reinstallSelectedHouse,
+    moveSelectedHouse,
     WALL_VARIANT_OPTIONS,
     type RoomTemplate,
     type HousingEditorTool,
@@ -79,7 +80,8 @@
   let editHouseId = $state<string | null>(null)
   let editRoomIdx = $state<number | null>(null)
   let editVersion = $state(0)
-  let reinstalling = $state(false)
+  let houseAction = $state<'reinstall' | 'move' | null>(null)
+  let moveError = $state(false)
 
   // Derived: the room being edited (editVersion forces recompute after local edits)
   let editHouse = $derived.by(() => {
@@ -101,7 +103,10 @@
     housingEditorTool.subscribe((v) => (tool = v)),
     placementFloorLevel.subscribe((v) => (floorLvl = v)),
     placementRoomType.subscribe((v) => (roomType = v)),
-    selectedHouseId.subscribe((v) => (editHouseId = v)),
+    selectedHouseId.subscribe((v) => {
+      editHouseId = v
+      moveError = false
+    }),
     selectedRoomIndex.subscribe((v) => (editRoomIdx = v)),
   ]
   function onWindowClick(e: MouseEvent) {
@@ -161,11 +166,19 @@
     pendingHouse = updatedHouse
     if (editSaveTimer) clearTimeout(editSaveTimer)
     editSaveTimer = setTimeout(async () => {
-      if (pendingHouse) {
-        await housingManager.updateHouse(pendingHouse)
-        pendingHouse = null
-      }
+      await flushPendingHouseEdit()
     }, 300)
+  }
+
+  async function flushPendingHouseEdit() {
+    if (editSaveTimer) {
+      clearTimeout(editSaveTimer)
+      editSaveTimer = null
+    }
+    if (!pendingHouse) return
+    const house = pendingHouse
+    pendingHouse = null
+    await housingManager.updateHouse(house)
   }
 
   const WALL_DIRS: { label: string; dir: WallDirection }[] = [
@@ -229,12 +242,28 @@
   }
 
   async function onReinstallHouse() {
-    if (!reinstallSelectedHouse || reinstalling) return
-    reinstalling = true
+    if (!reinstallSelectedHouse || houseAction) return
+    houseAction = 'reinstall'
     try {
+      await flushPendingHouseEdit()
       await reinstallSelectedHouse()
     } finally {
-      reinstalling = false
+      houseAction = null
+    }
+  }
+
+  async function onMoveHouse(deltaX: number, deltaZ: number) {
+    if (!moveSelectedHouse || houseAction) return
+    houseAction = 'move'
+    moveError = false
+    try {
+      await flushPendingHouseEdit()
+      moveError = !(await moveSelectedHouse(deltaX, deltaZ))
+    } catch (error) {
+      console.error('Failed to move house:', error)
+      moveError = true
+    } finally {
+      houseAction = null
     }
   }
 </script>
@@ -274,8 +303,10 @@
         <button
           class="tool-btn tool-reinstall"
           onclick={onReinstallHouse}
-          disabled={reinstalling}
-          >{reinstalling ? 'Reinstalling...' : 'Reinstall'}</button
+          disabled={houseAction !== null}
+          >{houseAction === 'reinstall'
+            ? 'Reinstalling...'
+            : 'Reinstall'}</button
         >
         <button
           class="tool-btn tool-delete"
@@ -283,6 +314,42 @@
         >
       {/if}
     </div>
+
+    {#if tool === 'select' && editHouseId != null && editRoomIdx != null}
+      <div class="section-title">
+        Move House <span class="hint">(1 tile)</span>
+      </div>
+      <div class="move-grid">
+        <button
+          class="move-btn move-up"
+          disabled={houseAction !== null}
+          title="Move house north (-Z)"
+          onclick={() => onMoveHouse(0, -1)}>↑</button
+        >
+        <button
+          class="move-btn move-left"
+          disabled={houseAction !== null}
+          title="Move house west (-X)"
+          onclick={() => onMoveHouse(-1, 0)}>←</button
+        >
+        <span class="move-center">{houseAction === 'move' ? '…' : '⌂'}</span>
+        <button
+          class="move-btn move-right"
+          disabled={houseAction !== null}
+          title="Move house east (+X)"
+          onclick={() => onMoveHouse(1, 0)}>→</button
+        >
+        <button
+          class="move-btn move-down"
+          disabled={houseAction !== null}
+          title="Move house south (+Z)"
+          onclick={() => onMoveHouse(0, 1)}>↓</button
+        >
+      </div>
+      {#if moveError}
+        <div class="move-error">Cannot move there</div>
+      {/if}
+    {/if}
 
     {#snippet texSwatch(texIdx: number)}
       {#if texPreviews[texIdx]}
@@ -597,6 +664,67 @@
 
   .tool-delete:hover {
     background: rgba(255, 80, 80, 0.3);
+  }
+
+  .move-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 30px);
+    grid-template-rows: repeat(3, 26px);
+    justify-content: center;
+    gap: 2px;
+  }
+
+  .move-btn {
+    border: 1px solid rgba(68, 170, 255, 0.45);
+    border-radius: 4px;
+    background: rgba(68, 170, 255, 0.12);
+    color: #7fc4ff;
+    cursor: pointer;
+    font-size: 15px;
+  }
+
+  .move-btn:hover:not(:disabled) {
+    background: rgba(68, 170, 255, 0.28);
+  }
+
+  .move-btn:disabled {
+    cursor: wait;
+    opacity: 0.5;
+  }
+
+  .move-up {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .move-left {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .move-center {
+    grid-column: 2;
+    grid-row: 2;
+    align-content: center;
+    color: #888;
+    text-align: center;
+  }
+
+  .move-right {
+    grid-column: 3;
+    grid-row: 2;
+  }
+
+  .move-down {
+    grid-column: 2;
+    grid-row: 3;
+  }
+
+  .move-error {
+    margin-top: 4px;
+    color: #ff7777;
+    font-size: 10px;
+    text-align: center;
   }
 
   .info-text {

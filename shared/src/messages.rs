@@ -363,6 +363,14 @@ pub enum ClientMessage {
     /// The scene has finished compiling, so the player can be hit again. See
     /// `entity::WORLD_LOADING_GRACE_MS`.
     WorldReady,
+    /// Start an arc turn from the authoritative position or cancel it.
+    PlayerMountTurn {
+        rotation: f32,
+        #[serde(default)]
+        stop: bool,
+        #[serde(default)]
+        sprinting: bool,
+    },
     PlayerMove {
         position: Position,
         rotation: f32,
@@ -472,7 +480,9 @@ pub enum ClientMessage {
     StopInteraction,
     Heartbeat,
     PlaceHouse {
-        house: housing::HouseData,
+        instance_id: u64,
+        origin: Position,
+        quarter_turns: u8,
     },
     ModifyRoom {
         house_id: String,
@@ -531,10 +541,29 @@ pub enum ClientMessage {
         edge: crate::fence::FenceEdge,
         place: bool,
     },
-    StartFenceMode,
-    StartLandscapingMode,
+    StartLandscapingMode {
+        tool: crate::landscaping::LandscapingTool,
+    },
     EditLandscape {
         stroke: crate::landscaping::LandscapingStroke,
+    },
+    PlaceEstateChest {
+        instance_id: u64,
+        position: Position,
+        rotation_deg: f32,
+        floor_level: i8,
+    },
+    OpenEstateChest {
+        chest_id: i64,
+    },
+    TransferEstateItems {
+        chest_id: i64,
+        deposits: Vec<BagLineItem>,
+        withdrawals: Vec<BagLineItem>,
+        expected_revision: u64,
+    },
+    RecoverEstateChest {
+        chest_id: i64,
     },
     LandAccount {
         merchant_player_id: PlayerId,
@@ -1199,6 +1228,10 @@ pub enum ServerMessage {
         player_id: PlayerId,
         enabled: bool,
     },
+    PlayerMountChanged {
+        player_id: PlayerId,
+        mounted: bool,
+    },
     /// The `wet` soaking went up or came off this player (doc/DEBUFF.md).
     /// Cosmetic — only the footprint trail reads it.
     PlayerWetToggled {
@@ -1257,6 +1290,23 @@ pub enum ServerMessage {
         removed: Vec<crate::fence::FenceEdge>,
     },
     FenceEditResult {
+        error: Option<String>,
+    },
+    EstateChestMode {
+        instance_id: u64,
+        item_def_id: String,
+        owner_id: i64,
+        plots: Vec<crate::fence::FencePlot>,
+    },
+    EstateChestVisibility {
+        added: Vec<crate::estate_storage::EstateChest>,
+        removed: Vec<i64>,
+    },
+    EstateChestEditResult {
+        error: Option<String>,
+    },
+    EstateChestState {
+        state: Option<crate::estate_storage::EstateChestState>,
         error: Option<String>,
     },
     LandClaimed {
@@ -1340,10 +1390,29 @@ pub enum ServerMessage {
     HouseSpawned {
         house: housing::HouseData,
     },
+    HousePlacementStarted {
+        instance_id: u64,
+        item_name: String,
+        house: housing::HouseData,
+        plots: Vec<crate::fence::FencePlot>,
+    },
+    HousePlacementResult {
+        error: Option<String>,
+    },
+    HouseDemolitionResult {
+        house_id: String,
+        error: Option<String>,
+    },
     HouseUpdated {
         house: housing::HouseData,
     },
+    HeightTilesInvalidated {
+        tiles: Vec<(i32, i32)>,
+    },
     TreeTilesInvalidated {
+        tiles: Vec<(i32, i32)>,
+    },
+    GrassTilesInvalidated {
         tiles: Vec<(i32, i32)>,
     },
     HouseRemoved {

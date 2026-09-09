@@ -32,6 +32,7 @@ pub enum LandscapingTool {
     Ground,
     Road,
     Fence,
+    House,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

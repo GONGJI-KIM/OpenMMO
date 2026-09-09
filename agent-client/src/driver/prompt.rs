@@ -17,7 +17,7 @@ fn within_event_range(state: &SharedState, x: f32, z: f32) -> bool {
         <= NPC_SIGHT_RADIUS
 }
 
-fn player_within_event_range(state: &SharedState, player_id: &PlayerId) -> bool {
+pub(crate) fn player_within_event_range(state: &SharedState, player_id: &PlayerId) -> bool {
     if state.self_player_id.as_ref() == Some(player_id) {
         return true;
     }
@@ -126,8 +126,7 @@ pub(super) fn build_prompt(
 
     if !state.chat_history().is_empty() {
         prompt.push_str(
-            "\n=== RECENT CONVERSATION (context only — you already handled \
-             these lines; never answer them again) ===\n",
+            "\n=== RECENT CONVERSATION (background only; do not answer old lines again) ===\n",
         );
         for line in state.chat_history() {
             prompt.push_str(line);
@@ -135,11 +134,23 @@ pub(super) fn build_prompt(
         }
     }
 
+    if !state.pending_chat().is_empty() {
+        prompt
+            .push_str("\n=== NEW CONVERSATION (reply when a response fits naturally, even without your name; do not reply to every line) ===\n");
+        for line in state.pending_chat() {
+            prompt.push_str(line);
+            prompt.push('\n');
+        }
+    }
+
     let has_server_events = events.iter().any(|e| format_event(state, e).is_some());
     if has_server_events || !agent_events.is_empty() {
-        prompt.push_str("\n=== EVENTS ===\n");
+        prompt.push_str("\n=== EVENTS ===\nRespond to [Urgent] triggers using the conversation above; other events inform your routine.\n");
         for event in events {
             if let Some(line) = format_event(state, event) {
+                if state.classify_event(event) == crate::state::EventUrgency::Urgent {
+                    prompt.push_str("[Urgent] ");
+                }
                 prompt.push_str(&line);
                 prompt.push('\n');
             }
@@ -152,29 +163,6 @@ pub(super) fn build_prompt(
 
     prompt.push_str("\nWhat do you do?");
     prompt
-}
-
-/// Fold a drained event batch into the rolling conversation history:
-/// what people said and what music started, nothing transient. Runs on
-/// every drain — including the ones whose prompt is skipped — so a waking
-/// NPC still knows what it heard.
-pub(super) fn record_conversation(state: &mut SharedState, events: &[ServerMessage]) {
-    let lines: Vec<String> = events
-        .iter()
-        .filter(|e| {
-            matches!(
-                e,
-                ServerMessage::ChatMessage { .. }
-                    | ServerMessage::WhisperMessage { .. }
-                    | ServerMessage::PartyChatMessage { .. }
-                    | ServerMessage::PlayerMusicStarted { .. }
-            )
-        })
-        .filter_map(|e| format_event(state, e))
-        .collect();
-    for line in lines {
-        state.push_chat_history(&line);
-    }
 }
 
 /// Format a server event as a human-readable line for LLM prompts.
@@ -773,7 +761,7 @@ fn format_schedule_context(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_prompt, caught_line, format_event, record_conversation};
+    use super::{build_prompt, caught_line, format_event};
 
     #[test]
     fn the_dining_cue_names_the_meal_and_the_menu() {
@@ -822,7 +810,11 @@ mod tests {
                 player_id: PlayerId::from(2),
             },
         ];
-        record_conversation(&mut state, &heard);
+        for event in heard {
+            state.push_event(event);
+        }
+        state.drain_events();
+        state.finish_conversation();
 
         let prompt = build_prompt(&state, &[], &[], &[], None, None, None, None);
         assert!(prompt.contains("RECENT CONVERSATION"), "{prompt}");
@@ -853,20 +845,24 @@ mod tests {
         assert!(prompt.contains("jake1 tips well"), "{prompt}");
     }
 
-    /// The evening's deed rides in as its own section; with none handed
+    /// The current deed rides in as its own section; with none handed
     /// over there is no section to sing from.
     #[test]
     fn a_tale_is_a_section_of_its_own() {
         let (state, _rx) = test_state();
-        let deed = crate::tales::Deed::parse("2026-09-02 boss_kill Alder ogre_boss").unwrap();
-        let section = crate::tales::prompt_section(&deed, crate::tales::Lang::Korean);
+        let deed = crate::tales::Deed::parse(
+            "2026-09-02 | Alder | Alder slew the Ogre Warlord. Celebrate the victory.",
+        )
+        .unwrap();
+        let section = crate::tales::prompt_section(&deed, crate::tales::Lang::Korean, true);
         let prompt = build_prompt(&state, &[], &[], &[], None, None, None, Some(section));
-        assert!(prompt.contains("=== TONIGHT'S TALE"), "{prompt}");
+        assert!(prompt.contains("=== CURRENT TALE"), "{prompt}");
+        assert!(prompt.contains("Automatic rotation: DUE"), "{prompt}");
         assert!(prompt.contains("Alder slew the Ogre Warlord"), "{prompt}");
         assert!(prompt.contains("Hero: Alder"), "{prompt}");
         assert!(prompt.contains("Language: Korean"), "{prompt}");
         let prompt = build_prompt(&state, &[], &[], &[], None, None, None, None);
-        assert!(!prompt.contains("TONIGHT'S TALE"), "{prompt}");
+        assert!(!prompt.contains("CURRENT TALE"), "{prompt}");
     }
 
     /// Waking in the inn's sick room is a change of place the LLM cannot see

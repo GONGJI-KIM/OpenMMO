@@ -12,6 +12,7 @@
   } from '../stores/quickslotStore'
   import { dragMeta, dragPos, quickslotAt } from '../stores/dragStore'
   import { itemTooltip } from '../actions/itemTooltip'
+  import { instrumentPanelVisible } from '../stores/instrumentStore'
 
   interface Props {
     /** Active character id — used to load that character's saved quickslots. */
@@ -60,6 +61,7 @@
 
   // Digit1..Digit9 → slots 0..8, Digit0 → slot 9.
   function handleKeydown(event: KeyboardEvent) {
+    if ($instrumentPanelVisible) return
     if (event.ctrlKey || event.altKey || event.metaKey) return
     const tag = (document.activeElement?.tagName ?? '').toLowerCase()
     if (tag === 'input' || tag === 'textarea') return

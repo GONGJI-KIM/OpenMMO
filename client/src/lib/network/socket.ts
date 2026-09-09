@@ -14,7 +14,10 @@ import { resetFriendStores } from '../stores/friendStore'
 import { resetPlayerTrade } from '../stores/playerTradeStore'
 import { resetLandClaimPreview, type LandClaim } from '../stores/landClaimStore'
 import { resetFences } from '../stores/fenceStore'
+import { resetHousePlacement } from '../stores/housePlacementStore'
+import { resetEstateStorage } from '../stores/estateStorageStore'
 import type { FenceEdge } from '../terrain/fenceEdges'
+import type { LandscapingTool } from '../terrain/landscaping'
 import { remotePlayerManager } from '../managers/remotePlayerManager'
 import { monsterManager } from '../managers/monsterManager'
 import {
@@ -235,6 +238,8 @@ class NetworkManager {
 
     this.socket.onclose = (event) => {
       resetFences()
+      resetHousePlacement()
+      resetEstateStorage()
       resetLandClaimPreview()
       console.log('Disconnected from server', event.code, event.reason)
       gameStore.update((state) => ({ ...state, isConnected: false }))
@@ -470,6 +475,10 @@ class NetworkManager {
     }
   }
 
+  sendPlayerMountTurn(rotation: number, stop = false, sprinting = false) {
+    this.sendMessage({ PlayerMountTurn: { rotation, stop, sprinting } })
+  }
+
   sendPlayerMove(
     position: { x: number; y: number; z: number },
     rotation: number,
@@ -703,6 +712,21 @@ class NetworkManager {
     this.sendMessage({ UseItem: { instance_id: instanceId } })
   }
 
+  sendPlaceHouse(instanceId: number, origin: Position, quarterTurns: number) {
+    if (!this.isNetworkableInstanceId(instanceId, 'place house')) return
+    this.sendMessage({
+      PlaceHouse: {
+        instance_id: instanceId,
+        origin,
+        quarter_turns: quarterTurns,
+      },
+    })
+  }
+
+  sendRemoveHouse(houseId: string) {
+    this.sendMessage({ RemoveHouse: { house_id: houseId } })
+  }
+
   sendLandClaim(claim: LandClaim) {
     const { instance_id, tile_x, tile_z, quadrant } = claim
     this.sendMessage({
@@ -714,18 +738,61 @@ class NetworkManager {
     this.sendMessage({ EditFence: { edge, place } })
   }
 
-  sendStartFenceMode() {
-    this.sendMessage('StartFenceMode')
-  }
-
-  sendStartLandscapingMode() {
-    this.sendMessage('StartLandscapingMode')
+  sendStartLandscapingMode(tool: LandscapingTool) {
+    this.sendMessage({ StartLandscapingMode: { tool } })
   }
 
   sendEditLandscape(
     stroke: import('../terrain/landscaping').LandscapingStroke
   ) {
     this.sendMessage({ EditLandscape: { stroke } })
+  }
+
+  sendPlaceEstateChest(
+    instanceId: number,
+    position: Position,
+    rotationDeg: number,
+    floorLevel: number
+  ) {
+    this.sendMessage({
+      PlaceEstateChest: {
+        instance_id: instanceId,
+        position,
+        rotation_deg: rotationDeg,
+        floor_level: floorLevel,
+      },
+    })
+  }
+
+  sendOpenEstateChest(chestId: number) {
+    this.sendMessage({ OpenEstateChest: { chest_id: chestId } })
+  }
+
+  sendTransferEstateItems(
+    chestId: number,
+    deposits: BagLineItem[],
+    withdrawals: BagLineItem[],
+    revision: number
+  ) {
+    const validDeposits = deposits.filter((item) =>
+      this.isNetworkableInstanceId(item.instance_id, 'store')
+    )
+    const validWithdrawals = withdrawals.filter((item) =>
+      this.isNetworkableInstanceId(item.instance_id, 'take')
+    )
+    if (validDeposits.length === 0 && validWithdrawals.length === 0) return
+    this.sendMessage({
+      TransferEstateItems: {
+        chest_id: chestId,
+        deposits: validDeposits,
+        withdrawals: validWithdrawals,
+        expected_revision: revision,
+      },
+    })
+  }
+
+  sendRecoverEstateChest(chestId: number) {
+    this.sendMessage({ RecoverEstateChest: { chest_id: chestId } })
   }
 
   sendLandAccount(merchantPlayerId: number) {

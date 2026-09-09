@@ -34,9 +34,10 @@
 | `health_lost` | 실제 감소한 HP를 `monster`, `debuff`, `death_penalty` 등으로 분리 |
 | `deaths`, `level_ups` | 사망·레벨업 처리 횟수 |
 | `monsters` | 몬스터 종류별 집계 |
+| `player_attacks` | 플레이어가 보낸 공격 요청의 판정 건수와 요청별 상세 기록 (`schema: 2`부터) |
 | `history_overflow` | 공격 이력 추적 상한에 도달했는지 여부 |
 
-`monsters`의 각 종류에는 `server_attempts`, `client_requests`, `rejected`(사유별), `hits`, `misses`, `damage`, `kills`, `kills_without_observed_attempt`가 들어간다.
+`monsters`의 각 종류에는 `server_attempts`, `client_requests`, `rejected`(사유별), `hits`, `misses`, `damage`, `kills`, `kills_without_observed_attempt`가 들어간다. 처치 관련 필드 외에는 **몬스터가 추적 캐릭터를 공격한 내역**이며, 플레이어의 공격 횟수·명중률과 구분한다.
 
 - 공격 시도는 AI가 공격 명령을 실행하거나 클라이언트 요청이 들어온 횟수이다. AI의 탐색·접근·대기 자체는 시도로 세지 않는다. 클라이언트 요청은 서버 시도와 별도 집계한다.
 - 거부 사유는 `missing_monster`, `not_controllable`, `cooldown`, `target_not_damageable`, `unreachable_floor`, `out_of_range`, `wall`, `target_disappeared_or_dead`, `client_disabled`이다. 없는 몬스터와 무시된 클라이언트 요청의 종류는 `unknown`이다.
@@ -44,6 +45,27 @@
 - `kills`는 본인이 마지막 타격을 가한 처치 수이다. 파티 공유 경험치 횟수가 아니다.
 - `kills_without_observed_attempt`는 **추적 중 해당 캐릭터를 향한 공격 시도를 관측하지 못한 처치**다. 다른 사람에게 공격했거나, 추적 전에 공격했거나, 한 방에 죽은 경우도 포함한다. 이것만으로 악용을 판정하지 않는다. 시도 이력은 1분 경계를 넘어 유지한다.
 - 몬스터 이력은 대상당 최대 4,096개이며 사라진 몬스터를 주기적으로 정리한다. 상한을 넘으면 해당 추적 세션의 `history_overflow`를 표시하고 이력이 없는 처치를 무반격 수치에 더하지 않는다.
+
+### 플레이어 공격 요청
+
+`player_attacks.requests`는 해당 구간에 판정이 기록된 요청 수이며, `outcomes`는 `accepted`, `cooldown`, `invalid_target`, `out_of_range`, `out_of_ammo`, `attacker_dead`, `not_in_game`, `interrupted`별 건수다. `accepted`는 대상 검사와 공격 간격 검사를 통과했다는 뜻으로, 명중·실제 피해 발생을 뜻하지 않는다. 판정 전 작업이 취소되면 추적 세션이 유지되는 경우 `interrupted`로 남는다.
+
+`events`에는 캐릭터당 구간별 최초 256건을 기록한다. 초과한 요청도 전체·결과별 건수에는 포함하며, 상세 기록 생략 수를 `dropped_events`로 남긴다.
+
+| 필드 | 의미 |
+| --- | --- |
+| `requested_at_ms` | 서버의 플레이어 공격 처리 진입 시각(Unix ms). 클라이언트 전송 시각이나 소켓 수신 시각이 아님 |
+| `request_interval_ms` | 같은 추적 세션의 직전 공격 요청과의 간격. 대상 변경·1분 경계를 넘어 유지하며, 최초 요청은 `null` |
+| `monster_id` | 요청 대상 ID. 최대 128자까지 기록 |
+| `outcome`, `detail` | 허용·거절 결과와 대상 검증 거절 상세 사유(시체·레지스트리 부재 등) |
+| `cooldown.checked_at_ms` | 서버가 공격 간격 판정에 사용한 시각 |
+| `cooldown.since_accepted_ms` | 서버가 기억하는 직전 허용 공격 이후 경과 시간. 이전 허용 공격이 없으면 `null` |
+| `cooldown.checked_interval_ms` | 이번 검사에서 적용한 최소 간격. 기본 1,380ms이며, 기본 검사 통과 후에는 배고픔 배율을 반영 |
+| `cooldown.accepted` | 간격 검사 통과 여부 |
+
+시체·거리 등의 검사에서 먼저 거절되면 `cooldown`은 `null`이다. 기본 간격보다 빠른 요청은 배고픔 조회 없이 먼저 거절하므로 이때 `checked_interval_ms`는 기본값이다. 허용된 공격은 배고픔까지 반영한 간격을 기록한다. 따라서 짧은 요청 간격과 짧은 **허용 공격 간격**을 구분할 수 있다. 공격 판정 규칙 자체는 바꾸지 않는다.
+
+집계는 판정이 끝난 시점의 구간에 포함되므로 경계에서 시작된 요청은 다음 구간에 기록될 수 있다. 추적 해제·로그아웃 후 종료되는 요청은 해당 세션의 기록에 포함되지 않을 수 있다. 기존 `schema: 1` 로그에는 `player_attacks`가 없으며, 새 버전과 같은 날짜 파일에 섞일 수 있다.
 
 파일 쓰기는 게임 상태 잠금 밖의 작업에서 수행한다. 쓰기 실패 시 오류를 남기고 마감 구간을 재시도한다. 미저장 구간은 최대 16,384개이며 초과하면 가장 오래된 구간을 버리고 오류를 남긴다. 강제 종료 시 진행 중이거나 아직 저장하지 못한 구간은 유실될 수 있다. 정상 종료에서는 남은 구간을 저장한다.
 

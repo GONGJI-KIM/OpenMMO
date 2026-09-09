@@ -1,6 +1,16 @@
 # Land System: 영지
 
+2026-09-08: 영지 귀환 스크롤(`scroll_of_estate_return`, Scroll of Estate Return)을 추가했다.
+Rica·Wick이 마을 귀환 스크롤과 같은 기본 가격 800c(8s)에 판매한다. 가방·퀵슬롯에서
+사용하면 한 장을 소모하고 본인 캐릭터의 개척지 지상으로 즉시 이동한다. 던전·전투 중에도
+사용할 수 있으며, 세금 연체는 귀환을 막지 않는다. 처음 등록한 구획부터 중앙에 가까운
+지점을 찾고 건물·장애물·수심 0.1m 초과 지점을 피한다. 해당 구획에 도착할 곳이 없으면
+다음 소유 구획을 탐색한다. 영지 미소유·사망·거래 예약·안전한 도착 지점 없음·조회 실패
+시에는 소모하지 않는다. 같은 계정의 다른 캐릭터가 소유한 영지로는 귀환할 수 없다.
+아이콘과 모델은 기존 마을 귀환 스크롤 에셋을 재사용한다.
+
 목책의 중첩 보관·셀 변 설치·회수는 [FENCE_PLACEMENT.md](FENCE_PLACEMENT.md)에 구현되어 있다 (2026-09-06).
+영지 보관함의 보관·회수·층별 가구 배치 규칙은 [ESTATE_STORAGE.md](ESTATE_STORAGE.md)에 기록한다.
 조경사의 도구함을 통한 영지 꾸미기는 아래 §4에 구현되어 있다 (2026-09-06).
 영지 건축가 `Rowan`은 낮에 `world(-1450.0, 1.1, 4761.8)`, 회전 `-91.7°`에 서서
 목책·조경 도구함·바닥 재질 견본집 7종을 판매하고, 밤에는 1층 71번 침대에서 잔다.
@@ -406,7 +416,7 @@ Phase 1은 골드만. 소유자별 타이머 없이 달력에 맞춰 걷는다.
 
 ### 저장과 동기화
 
-프로토콜 v59: 조경 반경은 소수(float)를 지원한다. `StartLandscapingMode`, `EditLandscape`, `LandscapingMode`,
+프로토콜 v62: `StartLandscapingMode`는 `Estate Editor`에서 선택한 도구를 전달한다. 조경 반경은 소수(float)를 지원한다. `EditLandscape`, `LandscapingMode`,
 `LandscapingPaletteUnlocked`, `LandscapeChanged`, `LandscapeInvalidated`, `LandscapeEditResult`.
 해금 재질은 `character_landscaping_palettes(character_id, palette_slot)`에 저장한다.
 지형은 `landscaping/r±xx_±zz/l_±xxxx_±zzzz.bin`에 타일별로 원자적 교체한다.

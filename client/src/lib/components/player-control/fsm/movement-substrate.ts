@@ -1,3 +1,4 @@
+import { resolveHorseSteps } from '../../../utils/horseMovement'
 import {
   calculateMovementStep,
   initMovementState,
@@ -195,12 +196,27 @@ export function stepMovementSubstrate({
     deltaTimeSeconds
   )
 
+  if (result.mountSteps) {
+    const path = resolveHorseSteps(
+      result.mountSteps,
+      currentPos,
+      config.mountRotation ?? result.rotation,
+      { sampleHeight, isMovementBlocked, isUphillTooSteep }
+    )
+    if (path.blocked) {
+      writePlayerPosition(path.position, path.rotation)
+      sendPlayerMove(path.position, path.rotation, currentWaypointFloor)
+      return { kind: path.blocked }
+    }
+  }
+
   movementState.currentSpeed = result.newSpeed
   const currentSpeed = result.newSpeed
   const playerRotation = result.rotation
 
   if (result.arrived) {
     if (
+      !result.mountSteps &&
       isMovementBlocked(
         currentPos.x,
         currentPos.z,
@@ -250,7 +266,8 @@ export function stepMovementSubstrate({
       return {
         kind: 'next_waypoint',
         currentSpeed: nextMovementState.currentSpeed,
-        playerRotation: nextRotation,
+        playerRotation:
+          config.mountRotation === undefined ? nextRotation : playerRotation,
         movementTarget: wpPos,
         movementState: nextMovementState,
         currentWaypointIndex: nextWaypointIndex,
@@ -263,6 +280,7 @@ export function stepMovementSubstrate({
 
   let stepPos = result.newPos
   if (
+    !result.mountSteps &&
     isMovementBlocked(
       currentPos.x,
       currentPos.z,
@@ -281,7 +299,10 @@ export function stepMovementSubstrate({
 
   const dirX = Math.sin(result.rotation)
   const dirZ = Math.cos(result.rotation)
-  if (isUphillTooSteep(currentPos.x, currentPos.z, currentPos.y, dirX, dirZ)) {
+  if (
+    !result.mountSteps &&
+    isUphillTooSteep(currentPos.x, currentPos.z, currentPos.y, dirX, dirZ)
+  ) {
     sendPlayerMove(currentPos, playerRotation, currentWaypointFloor)
     return { kind: 'slope_blocked' }
   }
@@ -289,7 +310,9 @@ export function stepMovementSubstrate({
   writePlayerPosition(
     {
       x: stepPos.x,
-      y: sampleHeight(stepPos.x, stepPos.z),
+      y: result.mountSteps?.length
+        ? stepPos.y
+        : sampleHeight(stepPos.x, stepPos.z),
       z: stepPos.z,
     },
     playerRotation

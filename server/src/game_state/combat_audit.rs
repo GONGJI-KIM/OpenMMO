@@ -10,6 +10,7 @@ use std::sync::Mutex;
 
 const MAX_PENDING: usize = 16_384;
 const MAX_MONSTERS: usize = 4_096;
+const MAX_PLAYER_ATTACK_EVENTS: usize = 256;
 const CONFIG_RELOAD_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
 #[derive(Clone, PartialEq, Eq)]
@@ -31,6 +32,32 @@ struct MonsterTotals {
 }
 
 #[derive(Serialize)]
+pub(super) struct PlayerAttackWindow {
+    pub checked_at_ms: u64,
+    pub since_accepted_ms: Option<u64>,
+    pub checked_interval_ms: u64,
+    pub accepted: bool,
+}
+
+#[derive(Serialize)]
+struct PlayerAttackEvent {
+    requested_at_ms: u64,
+    request_interval_ms: Option<u64>,
+    monster_id: String,
+    outcome: String,
+    detail: Option<String>,
+    cooldown: Option<PlayerAttackWindow>,
+}
+
+#[derive(Default, Serialize)]
+struct PlayerAttackTotals {
+    requests: u64,
+    outcomes: BTreeMap<String, u64>,
+    events: Vec<PlayerAttackEvent>,
+    dropped_events: u64,
+}
+
+#[derive(Serialize)]
 struct Window {
     schema: u8,
     character_id: i64,
@@ -49,12 +76,13 @@ struct Window {
     level_ups: u64,
     history_overflow: bool,
     monsters: BTreeMap<String, MonsterTotals>,
+    player_attacks: PlayerAttackTotals,
 }
 
 impl Window {
     fn new(character_id: i64, p: &Player, now: u64) -> Self {
         Self {
-            schema: 1,
+            schema: 2,
             character_id,
             player_id: p.id,
             name: p.name.clone(),
@@ -71,6 +99,7 @@ impl Window {
             level_ups: 0,
             history_overflow: false,
             monsters: BTreeMap::new(),
+            player_attacks: PlayerAttackTotals::default(),
         }
     }
 
@@ -102,6 +131,8 @@ impl Window {
 struct Session {
     window: Window,
     attempted: HashSet<String>,
+    tracking_started_ms: u64,
+    last_player_request_ms: Option<u64>,
 }
 
 #[derive(Default)]
@@ -143,6 +174,8 @@ impl State {
             self.sessions.entry(p.id).or_insert_with(|| Session {
                 window: Window::new(character_id, p, now),
                 attempted: HashSet::new(),
+                tracking_started_ms: now,
+                last_player_request_ms: None,
             });
         }
     }
@@ -236,6 +269,32 @@ impl CombatAudit {
         }
     }
 
+    pub(super) fn player_attack(&self, id: PlayerId, monster_id: &str) -> Option<PlayerAttack<'_>> {
+        if !self.active.load(Ordering::Relaxed) {
+            return None;
+        }
+        let mut state = self.state.lock().expect("audit state");
+        let session = state.sessions.get_mut(&id)?;
+        let now = GameState::now_ms();
+        let request_interval_ms = session
+            .last_player_request_ms
+            .map(|last| now.saturating_sub(last));
+        session.last_player_request_ms = Some(now);
+        Some(PlayerAttack {
+            audit: self,
+            id,
+            tracking_started_ms: session.tracking_started_ms,
+            event: Some(PlayerAttackEvent {
+                requested_at_ms: now,
+                request_interval_ms,
+                monster_id: monster_id.chars().take(128).collect(),
+                outcome: "interrupted".into(),
+                detail: None,
+                cooldown: None,
+            }),
+        })
+    }
+
     fn refresh(
         &self,
         config: Option<Config>,
@@ -285,6 +344,8 @@ impl CombatAudit {
                             Session {
                                 window,
                                 attempted: session.attempted,
+                                tracking_started_ms: session.tracking_started_ms,
+                                last_player_request_ms: session.last_player_request_ms,
                             },
                         );
                     }
@@ -329,6 +390,48 @@ impl CombatAudit {
             self.state.lock().expect("audit state").last_pruned = Some(key);
         }
         Ok(())
+    }
+}
+
+pub(super) struct PlayerAttack<'a> {
+    audit: &'a CombatAudit,
+    id: PlayerId,
+    tracking_started_ms: u64,
+    event: Option<PlayerAttackEvent>,
+}
+
+impl PlayerAttack<'_> {
+    pub(super) fn finish(
+        mut self,
+        outcome: String,
+        detail: Option<String>,
+        cooldown: Option<PlayerAttackWindow>,
+    ) {
+        let event = self.event.as_mut().expect("player attack event");
+        event.outcome = outcome;
+        event.detail = detail;
+        event.cooldown = cooldown;
+    }
+}
+
+impl Drop for PlayerAttack<'_> {
+    fn drop(&mut self) {
+        let mut state = self.audit.state.lock().expect("audit state");
+        let Some(session) = state.sessions.get_mut(&self.id) else {
+            return;
+        };
+        if session.tracking_started_ms != self.tracking_started_ms {
+            return;
+        }
+        let event = self.event.take().expect("player attack event");
+        let totals = &mut session.window.player_attacks;
+        totals.requests += 1;
+        *totals.outcomes.entry(event.outcome.clone()).or_default() += 1;
+        if totals.events.len() < MAX_PLAYER_ATTACK_EVENTS {
+            totals.events.push(event);
+        } else {
+            totals.dropped_events += 1;
+        }
     }
 }
 
@@ -620,6 +723,32 @@ mod tests {
         let state = audit.state.lock().unwrap();
         assert!(state.sessions.is_empty());
         assert_eq!(state.pending.back().unwrap().reason, "disabled");
+    }
+
+    #[test]
+    fn player_attack_details_are_bounded_and_intervals_survive_rotation() {
+        let (audit, players) = setup();
+        let p = players.values().next().unwrap();
+        for _ in 0..MAX_PLAYER_ATTACK_EVENTS + 2 {
+            audit.player_attack(p.id, "missing").unwrap().finish(
+                "invalid_target".into(),
+                Some("absent from registry".into()),
+                None,
+            );
+        }
+        audit.refresh(None, &players, 61_000, false);
+        drop(audit.player_attack(p.id, "cancelled"));
+        audit.refresh(None, &players, 121_000, true);
+        let state = audit.state.lock().unwrap();
+        let first = &state.pending[0].player_attacks;
+        assert_eq!(first.requests, MAX_PLAYER_ATTACK_EVENTS as u64 + 2);
+        assert_eq!(first.outcomes["invalid_target"], first.requests);
+        assert_eq!(first.events.len(), MAX_PLAYER_ATTACK_EVENTS);
+        assert_eq!(first.dropped_events, 2);
+        let second = &state.pending[1].player_attacks;
+        assert_eq!(second.requests, 1);
+        assert_eq!(second.outcomes["interrupted"], 1);
+        assert!(second.events[0].request_interval_ms.is_some());
     }
 
     #[test]

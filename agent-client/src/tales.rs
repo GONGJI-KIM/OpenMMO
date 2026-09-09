@@ -1,235 +1,38 @@
 //! Draw true deeds from the ledger for the bard to embellish and sing.
 
 use std::collections::HashMap;
-use std::sync::LazyLock;
 
 use rand::seq::SliceRandom;
 use rand::Rng;
-use serde::Deserialize;
 use tracing::warn;
 
 pub const LEDGER_PATH: &str = "data/tales/ledger.txt";
 
-/// Deeds drawn for one evening's performance.
-pub const PICKS_PER_NIGHT: usize = 3;
+/// Deeds drawn for one performance set.
+pub const PICKS_PER_SET: usize = 3;
 
-#[derive(Debug, Deserialize)]
-struct Named {
-    name: String,
-}
-
-static MONSTERS: LazyLock<HashMap<String, Named>> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("../../data/monsters.json")).unwrap_or_default()
-});
-static MAP_LABELS: LazyLock<HashMap<String, Named>> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("../../data/map_labels.json")).unwrap_or_default()
-});
-
-fn monster_name(id: &str) -> &str {
-    MONSTERS.get(id).map_or(id, |m| m.name.as_str())
-}
-
-fn dungeon_name(id: &str) -> &str {
-    onlinerpg_shared::dungeon::entrance(id).map_or(id, |d| d.name.as_str())
-}
-
-fn place_name(id: &str) -> &str {
-    MAP_LABELS.get(id).map_or(id, |l| l.name.as_str())
-}
-
-fn item_name(id: &str) -> &str {
-    crate::item_defs::get(id).map_or(id, |d| d.name.as_str())
-}
-
-fn trick_name(id: &str) -> &str {
-    match id {
-        "respawn_reset" => {
-            "stepping out of the floor and straight back in so the slain beasts rose again at once"
-        }
-        other => other,
-    }
-}
-
-/// One ledger line: `DATE KIND NAME [arg | key=value]...`, whitespace
-/// separated.
+/// One ledger line: `DATE | HERO | FACTS AND PERFORMANCE DIRECTION`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Deed {
     pub date: String,
-    pub kind: String,
-    pub name: String,
-    args: Vec<String>,
-    fields: HashMap<String, String>,
+    pub hero: String,
+    pub brief: String,
 }
 
 impl Deed {
     pub fn parse(line: &str) -> Option<Deed> {
-        let mut tokens = line.split_whitespace();
-        let date = tokens.next()?.to_string();
-        let kind = tokens.next()?.to_string();
-        let name = tokens.next()?.to_string();
-        let mut args = Vec::new();
-        let mut fields = HashMap::new();
-        for token in tokens {
-            match token.split_once('=') {
-                Some((k, v)) => {
-                    fields.insert(k.to_string(), v.to_string());
-                }
-                None => args.push(token.to_string()),
-            }
+        let mut fields = line.splitn(3, '|').map(str::trim);
+        let date = fields.next()?;
+        let hero = fields.next()?;
+        let brief = fields.next()?;
+        if date.is_empty() || hero.is_empty() || brief.is_empty() {
+            return None;
         }
         Some(Deed {
-            date,
-            kind,
-            name,
-            args,
-            fields,
+            date: date.to_string(),
+            hero: hero.to_string(),
+            brief: brief.to_string(),
         })
-    }
-
-    fn arg(&self, i: usize) -> Option<&str> {
-        self.args.get(i).map(String::as_str)
-    }
-
-    fn field(&self, key: &str) -> Option<&str> {
-        self.fields.get(key).map(String::as_str)
-    }
-
-    fn flag(&self, key: &str) -> bool {
-        self.field(key) == Some("true")
-    }
-
-    pub fn mood(&self) -> &'static str {
-        match self.kind.as_str() {
-            "enchant_break" | "boss_death" => "tragic",
-            "exploit" => "mocking",
-            "xp_lead" => "competitive",
-            _ => "heroic",
-        }
-    }
-
-    fn in_place(&self) -> String {
-        self.arg(1)
-            .map_or(String::new(), |d| format!(" in the {}", dungeon_name(d)))
-    }
-
-    /// The fact in plain words, for the bard to make a verse of.
-    pub fn render(&self) -> String {
-        let name = &self.name;
-        let mut text = match self.kind.as_str() {
-            "boss_kill" => {
-                let boss = monster_name(self.arg(0).unwrap_or("a great beast"));
-                let alone = if self.flag("solo") { ", alone" } else { "" };
-                let mut s = format!("{name} slew the {boss}{alone}{}.", self.in_place());
-                if self.flag("first") {
-                    s.push_str(" Nobody had ever done it before.");
-                }
-                s
-            }
-            "boss_death" => {
-                let boss = monster_name(self.arg(0).unwrap_or("a great beast"));
-                format!("{name} fell to the {boss}{}.", self.in_place())
-            }
-            "enchant_up" => {
-                let item = item_name(self.arg(0).unwrap_or("a weapon"));
-                let plus = self.arg(1).unwrap_or("+?");
-                let mut s = format!("{name} enchanted a {item} to {plus}.");
-                if self.flag("record") {
-                    s.push_str(" No blade in the realm has gone higher.");
-                }
-                s
-            }
-            "enchant_break" => {
-                let item = item_name(self.arg(0).unwrap_or("a weapon"));
-                let plus = self.arg(1).unwrap_or("+?");
-                format!("{name}'s {item} shattered on the anvil, reaching past {plus}.")
-            }
-            "level_record" => {
-                let level = self.arg(0).unwrap_or("?");
-                let mut s =
-                    format!("{name} reached level {level}, higher than anyone in the realm.");
-                if let Some((prev, at)) = self.field("prev").and_then(|p| p.split_once(':')) {
-                    s.push_str(&format!(" {prev} had held the mark at {at}."));
-                }
-                s
-            }
-            "xp_lead" => {
-                let mut s = match self.field("prev") {
-                    Some(prev) => format!(
-                        "{name} overtook {prev} to take first place in the realm's experience rankings."
-                    ),
-                    None => format!("{name} took first place in the realm's experience rankings."),
-                };
-                if let Some(level) = self.field("tied_level") {
-                    s.push_str(&format!(" They were tied at level {level}."));
-                }
-                if self.flag("close") {
-                    s.push_str(" The experience gap was narrow when observed.");
-                }
-                s
-            }
-            "most_levels" => {
-                let gained = self.arg(0).unwrap_or("+?").trim_start_matches('+');
-                match self.field("reached") {
-                    Some(l) => format!(
-                        "{name} climbed {gained} levels in a single day, more than anyone, and stands at level {l}."
-                    ),
-                    None => format!("{name} climbed {gained} levels in a single day, more than anyone."),
-                }
-            }
-            "most_xp" => {
-                let mut s = format!("{name} won more experience today than anyone in the realm.");
-                if let Some(n) = self.field("streak").and_then(|n| n.parse::<u32>().ok()) {
-                    if n > 1 {
-                        s.push_str(&format!(" That makes {n} days running."));
-                    }
-                }
-                s
-            }
-            "largest_estate" => {
-                let mut s = if self.flag("tied") {
-                    format!("{name} shared the lead for the largest player homestead in the realm.")
-                } else {
-                    format!("{name} held the largest player homestead in the realm.")
-                };
-                if let Some(plots) = self.field("plots") {
-                    s.push_str(&format!(" The estate covered {plots} claimed plots."));
-                }
-                s
-            }
-            "farthest" => match self.field("near") {
-                Some(place) => format!(
-                    "{name} travelled farther from Aldermark than anyone, all the way to {}.",
-                    place_name(place)
-                ),
-                None => format!("{name} travelled farther from Aldermark than anyone."),
-            },
-            "title" => {
-                let title = crate::title_defs::title_name(self.arg(0).unwrap_or("?"));
-                format!("{name} earned the title \"{title}\".")
-            }
-            "rich" => format!("{name}'s coffers now outweigh everyone else's in the realm."),
-            "exploit" => {
-                let trick = trick_name(self.arg(0).unwrap_or("a trick"));
-                let climb = match (self.field("from"), self.field("to")) {
-                    (Some(a), Some(b)) => format!(" from level {a} to {b}"),
-                    _ => String::new(),
-                };
-                format!("{name} climbed{climb}{} by {trick}.", self.in_place())
-            }
-            other => {
-                let rest: Vec<&str> = self
-                    .args
-                    .iter()
-                    .map(String::as_str)
-                    .chain(self.fields.values().map(String::as_str))
-                    .collect();
-                format!("{name}: {other} {}", rest.join(" "))
-                    .trim_end()
-                    .to_string()
-            }
-        };
-        text.push_str(&format!(" ({})", self.date));
-        text
     }
 }
 
@@ -259,20 +62,20 @@ pub fn parse_ledger(content: &str) -> Vec<Deed> {
 /// one and the set is not all stories.
 pub const SONGS_BETWEEN_TALES: usize = 2;
 
-/// Tonight's set: a few deeds, one per hero, newer lines favoured, sung in
+/// One performance set: a few deeds, one per hero, newer lines favoured, sung in
 /// turn and round again, a couple of songs apart.
 #[derive(Debug, Default)]
-pub struct TonightsTales {
+pub struct SetTales {
     picks: Vec<Deed>,
-    /// Tales told so far tonight: picks the current one and paces the
+    /// Tales told so far in this set: picks the current one and paces the
     /// language alternation.
     sung: usize,
     /// Our song count at which the next tale is due; 0 until the first.
     next_tale_at: usize,
 }
 
-impl TonightsTales {
-    pub fn draw<R: Rng>(ledger: &[Deed], count: usize, rng: &mut R) -> TonightsTales {
+impl SetTales {
+    pub fn draw<R: Rng>(ledger: &[Deed], count: usize, rng: &mut R) -> SetTales {
         // Rank weight: the newest line is worth `len` times the oldest.
         let mut pool: Vec<(usize, &Deed)> = ledger.iter().enumerate().collect();
         let mut picks = Vec::new();
@@ -281,10 +84,10 @@ impl TonightsTales {
                 break;
             };
             let deed = deed.clone();
-            pool.retain(|(_, d)| d.name != deed.name);
+            pool.retain(|(_, d)| d.hero != deed.hero);
             picks.push(deed);
         }
-        TonightsTales {
+        SetTales {
             picks,
             ..Default::default()
         }
@@ -298,12 +101,8 @@ impl TonightsTales {
         self.picks.get(self.sung % self.picks.len().max(1))
     }
 
-    /// The tale to tell now, once our song count has reached its turn.
-    pub fn due(&self, songs_started: usize) -> Option<&Deed> {
-        if songs_started < self.next_tale_at {
-            return None;
-        }
-        self.current()
+    pub fn is_due(&self, songs_started: usize) -> bool {
+        self.current().is_some() && songs_started >= self.next_tale_at
     }
 
     /// Told: the next one waits for this tale's own song plus the gap.
@@ -386,7 +185,7 @@ pub fn audience_lang<'a>(
     room
 }
 
-/// The language of the `nth` tale tonight: the room's, when it is of one
+/// The language of the `nth` tale in the set: the room's, when it is of one
 /// mind; otherwise Korean and English turn about, Korean first.
 pub fn tale_lang(audience: Option<Lang>, nth: usize) -> Lang {
     audience.unwrap_or(if nth.is_multiple_of(2) {
@@ -398,14 +197,16 @@ pub fn tale_lang(audience: Option<Lang>, nth: usize) -> Lang {
 
 /// Prompt section carrying the one deed the bard sings next; the how is
 /// in bard.txt's Tales rules.
-pub fn prompt_section(deed: &Deed, lang: Lang) -> String {
+pub fn prompt_section(deed: &Deed, lang: Lang, automatic_due: bool) -> String {
+    let rotation = if automatic_due { "DUE" } else { "WAITING" };
     format!(
-        "\n=== TONIGHT'S TALE (a true deed — sing it as you like) ===\n{}\nHero: {}\nMood: {}\n\
-         Language: {} for the opening line and every verse, whatever the listeners spoke.\n\
-         Tell it before your next song, as your Tales rules say.\n",
-        deed.render(),
-        deed.name,
-        deed.mood(),
+        "\n=== CURRENT TALE (a true deed — sing it as directed) ===\nAutomatic rotation: {rotation}\n\
+         Date: {}\nHero: {}\n\
+         Facts and performance direction: {}\n\
+         Language: {} for the opening line and every verse, whatever the listeners spoke.\n",
+        deed.date,
+        deed.hero,
+        deed.brief,
         lang.name()
     )
 }
@@ -418,102 +219,58 @@ mod tests {
 
     const LEDGER: &str = "\
 # comment
-2026-09-01\tboss_kill\tAlder\togre_boss\togre_dungeon\tsolo=false\tfirst=true
-2026-09-01  enchant_break  Brann  steel_longsword  +9
-2026-09-02  level_record   Cyra   32  prev=Alder:31
-2026-09-02  most_levels    Alder  +6  reached=14
-2026-09-02  most_xp        Dov    streak=3
-2026-09-02  farthest       Eir    near=brovik  dist=6300
-2026-09-02  rain_dance     Fenn   wet
+2026-09-01 | Alder | Alder slew the Ogre Warlord. Celebrate the realm's first victory over it.
+2026-09-01 | Brann | Brann's steel longsword shattered at +9. Sing it as a tragedy.
+2026-09-02 | Cyra | Cyra reached level 32, surpassing Alder's level 31 record.
+2026-09-02 | Alder | Alder climbed six levels in one day and reached level 14.
+2026-09-02 | Dov | Dov earned more experience than anyone for a third day running.
+2026-09-02 | Eir | Eir travelled farther from Aldermark than anyone, reaching Brovik.
+2026-09-02 | Fenn | Fenn danced in the rain | keep this phrase intact.
 garbage
-2026-09-04  exploit        Gorm   respawn_reset  ogre_stronghold  from=20  to=25
+2026-09-04 | Gorm | Gorm abused a respawn reset to climb from level 20 to 25. Satirize only the verified trick.
 ";
 
     #[test]
-    fn tabs_and_spaces_both_parse_and_bad_lines_are_skipped() {
+    fn pipe_delimited_lines_are_trimmed_and_bad_lines_are_skipped() {
         let deeds = parse_ledger(LEDGER);
         assert_eq!(deeds.len(), 8, "{deeds:?}");
-        assert_eq!(deeds[0].name, "Alder");
-        assert!(deeds[0].flag("first"));
-        assert_eq!(deeds[1].arg(1), Some("+9"));
+        assert_eq!(deeds[0].date, "2026-09-01");
+        assert_eq!(deeds[0].hero, "Alder");
+        assert!(deeds[0].brief.contains("first victory"));
+        assert!(deeds[6].brief.ends_with("| keep this phrase intact."));
+        assert!(Deed::parse("2026-09-01 | | missing hero").is_none());
+        assert!(Deed::parse("2026-09-01 | Alder | ").is_none());
     }
 
     #[test]
-    fn every_kind_renders_a_sentence_with_the_hero_in_it() {
-        for deed in parse_ledger(LEDGER) {
-            let text = deed.render();
-            assert!(text.contains(&deed.name), "{text}");
-            assert!(text.ends_with(&format!("({})", deed.date)), "{text}");
-        }
-        let deeds = parse_ledger(LEDGER);
-        assert!(
-            deeds[0].render().contains("Ogre Warlord"),
-            "{}",
-            deeds[0].render()
-        );
-        assert!(deeds[0].render().contains("Nobody had ever"));
-        assert!(deeds[1].render().contains("shattered"));
-        assert_eq!(deeds[1].mood(), "tragic");
-        assert_eq!(deeds[0].mood(), "heroic");
-        assert!(deeds[4].render().contains("3 days running"));
-        assert!(deeds[5].render().contains("Brovik"));
-        assert!(
-            deeds[6].render().starts_with("Fenn: rain_dance wet"),
-            "{}",
-            deeds[6].render()
-        );
-        let cheat = deeds[7].render();
-        assert!(cheat.contains("from level 20 to 25"), "{cheat}");
-        assert!(cheat.contains("straight back in"), "{cheat}");
-        assert!(cheat.contains("Ogre Stronghold"), "{cheat}");
-        assert_eq!(deeds[7].mood(), "mocking");
-    }
+    fn the_prompt_passes_the_natural_language_brief_through_unchanged() {
+        let brief = "판사가 레벨 34에 도달했다. 과거 어뷰즈를 가볍게 꼬집되 현재 성취는 인정한다.";
+        let deed = Deed::parse(&format!("2026-09-07 | 판사 | {brief}")).unwrap();
+        let prompt = prompt_section(&deed, Lang::Korean, true);
+        assert!(prompt.contains("Date: 2026-09-07"), "{prompt}");
+        assert!(prompt.contains("Hero: 판사"), "{prompt}");
+        assert!(prompt.contains(&format!("Facts and performance direction: {brief}")));
+        assert!(prompt.contains("Language: Korean"), "{prompt}");
+        assert!(!prompt.contains("Mood:"), "{prompt}");
 
-    #[test]
-    fn an_experience_lead_is_a_rivalry_not_a_new_level_record() {
-        let deed =
-            Deed::parse("2026-09-06 xp_lead Alder prev=Cyra tied_level=33 close=true").unwrap();
-        let prompt = prompt_section(&deed, Lang::Korean);
-        assert!(prompt.contains("Alder overtook Cyra to take first place"));
-        assert!(prompt.contains("experience rankings"));
-        assert!(prompt.contains("tied at level 33"));
-        assert!(prompt.contains("gap was narrow when observed"));
-        assert!(prompt.contains("Mood: competitive"));
-        assert!(prompt.contains("Language: Korean"));
-        assert!(!prompt.contains("higher than anyone"));
-
-        let deed = Deed::parse("2026-09-06 xp_lead Alder prev=Cyra").unwrap();
-        assert!(!deed.render().contains("tied at level"));
-        assert!(!deed.render().contains("gap was narrow"));
-    }
-
-    #[test]
-    fn largest_estates_distinguish_an_outright_lead_from_a_tie() {
-        let deed = Deed::parse("2026-09-07 largest_estate Alder plots=16").unwrap();
-        assert_eq!(
-            deed.render(),
-            "Alder held the largest player homestead in the realm. The estate covered 16 claimed plots. (2026-09-07)"
-        );
-        assert_eq!(deed.mood(), "heroic");
-        let tied = Deed::parse("2026-09-07 largest_estate Alder plots=16 tied=true").unwrap();
-        assert!(tied.render().contains("shared the lead"));
-        assert!(!tied.render().contains("held the largest"));
+        let waiting = prompt_section(&deed, Lang::Korean, false);
+        assert!(waiting.contains("Automatic rotation: WAITING"), "{waiting}");
     }
 
     #[test]
     fn a_draw_takes_one_deed_per_hero_up_to_the_cap() {
         let deeds = parse_ledger(LEDGER);
         let mut rng = StdRng::seed_from_u64(7);
-        let night = TonightsTales::draw(&deeds, 3, &mut rng);
-        assert_eq!(night.picks.len(), 3);
-        let mut names: Vec<&str> = night.picks.iter().map(|d| d.name.as_str()).collect();
+        let set = SetTales::draw(&deeds, 3, &mut rng);
+        assert_eq!(set.picks.len(), 3);
+        let mut names: Vec<&str> = set.picks.iter().map(|d| d.hero.as_str()).collect();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), 3, "{:?}", night.picks);
+        assert_eq!(names.len(), 3, "{:?}", set.picks);
 
-        let short = TonightsTales::draw(&deeds[..1], 3, &mut rng);
+        let short = SetTales::draw(&deeds[..1], 3, &mut rng);
         assert_eq!(short.picks.len(), 1);
-        assert!(TonightsTales::draw(&[], 3, &mut rng).current().is_none());
+        assert!(SetTales::draw(&[], 3, &mut rng).current().is_none());
     }
 
     #[test]
@@ -522,8 +279,8 @@ garbage
         let mut rng = StdRng::seed_from_u64(1);
         let mut first_pick_is_old = 0;
         for _ in 0..200 {
-            let night = TonightsTales::draw(&deeds, 1, &mut rng);
-            if night.picks[0].date == "2026-09-01" {
+            let set = SetTales::draw(&deeds, 1, &mut rng);
+            if set.picks[0].date == "2026-09-01" {
                 first_pick_is_old += 1;
             }
         }
@@ -568,15 +325,15 @@ garbage
     fn the_set_rotates_and_wraps() {
         let deeds = parse_ledger(LEDGER);
         let mut rng = StdRng::seed_from_u64(3);
-        let mut night = TonightsTales::draw(&deeds, 2, &mut rng);
-        let first = night.current().cloned().unwrap();
-        assert_eq!(night.sung(), 0);
-        night.advance(0);
-        assert_eq!(night.sung(), 1);
-        assert_ne!(night.current(), Some(&first));
-        night.advance(0);
-        assert_eq!(night.current(), Some(&first));
-        let mut empty = TonightsTales::default();
+        let mut set = SetTales::draw(&deeds, 2, &mut rng);
+        let first = set.current().cloned().unwrap();
+        assert_eq!(set.sung(), 0);
+        set.advance(0);
+        assert_eq!(set.sung(), 1);
+        assert_ne!(set.current(), Some(&first));
+        set.advance(0);
+        assert_eq!(set.current(), Some(&first));
+        let mut empty = SetTales::default();
         empty.advance(0);
         assert!(empty.current().is_none());
     }
@@ -586,12 +343,12 @@ garbage
     fn tales_come_two_songs_apart() {
         let deeds = parse_ledger(LEDGER);
         let mut rng = StdRng::seed_from_u64(3);
-        let mut night = TonightsTales::draw(&deeds, 2, &mut rng);
-        assert!(night.due(5).is_some(), "the first tale waits for nothing");
-        night.advance(5);
-        assert!(night.due(6).is_none(), "the tale's own song");
-        assert!(night.due(7).is_none(), "one plain song");
-        assert!(night.due(8).is_some(), "two plain songs");
-        assert!(TonightsTales::default().due(9).is_none());
+        let mut set = SetTales::draw(&deeds, 2, &mut rng);
+        assert!(set.is_due(5), "the first tale waits for nothing");
+        set.advance(5);
+        assert!(!set.is_due(6), "the tale's own song");
+        assert!(!set.is_due(7), "one plain song");
+        assert!(set.is_due(8), "two plain songs");
+        assert!(!SetTales::default().is_due(9));
     }
 }

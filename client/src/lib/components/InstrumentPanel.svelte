@@ -155,7 +155,6 @@
     closeInstrumentPanel()
   }
 
-  // Escape is left to the overlay stack, which closes whatever is on top.
   function claimGameplayKey(event: KeyboardEvent): boolean {
     if (event.ctrlKey || event.altKey || event.metaKey) return false
     if (isTypingTarget(event.target)) return false
@@ -177,6 +176,12 @@
     batcher = sessionBatcher
 
     const onKeydown = (event: KeyboardEvent) => {
+      if (event.code === 'Escape') {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        stop()
+        return
+      }
       if (!claimGameplayKey(event)) return
       strike(event.code, event.repeat)
     }

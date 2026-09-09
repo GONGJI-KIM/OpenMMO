@@ -46,19 +46,36 @@ import {
   fencePending,
   fenceError,
   resetFences,
+  stopFenceMode,
 } from '../stores/fenceStore'
 import {
   openLandscapingMode,
   landscapingMode,
   landscapingPending,
   landscapingError,
+  selectLandscapingTool,
 } from '../stores/landscapingStore'
 import type { LandscapingTile } from '../terrain/landscaping'
+import {
+  applyEstateChestVisibility,
+  estateChestError,
+  estateChestMode,
+  estateChestPending,
+  openEstateChest,
+  resetEstateStorage,
+  stopEstateChestMode,
+} from '../stores/estateStorageStore'
 import { inventoryVisible } from '../stores/debugStore'
 import {
   landClaimDialog,
   applyLandClaimPreview,
 } from '../stores/landClaimStore'
+import {
+  applyHousePlacementResult,
+  applyHouseDemolitionResult,
+  openHousePlacement,
+  resetHousePlacement,
+} from '../stores/housePlacementStore'
 import { capeTextureDialog } from '../stores/capeTextureStore'
 import { setCapeUploadToken } from '../utils/networkUtils'
 import { hungerState, grilling, type HungerBand } from '../stores/hungerStore'
@@ -127,6 +144,7 @@ import {
 } from '../stores/friendStore'
 import { enqueueConsent } from '../stores/consentQueue'
 import {
+  editorHeightManager,
   editorTreeDataManager,
   editorGrassDataManager,
   editorSplatManager,
@@ -237,6 +255,7 @@ function toRemotePlayer(sp: ServerPlayer): RemotePlayer {
     maxHealth: sp.max_health,
     characterClass: sp.class,
     gender: sp.gender,
+    mounted: sp.mounted ?? false,
     torchOn: sp.torch_on,
     wet: sp.wet ?? false,
     title: sp.title ?? null,
@@ -492,6 +511,8 @@ function syncOwnFloor(floorLevel: number | undefined, x: number, z: number) {
   playerVisualFloorLevel.set(Math.max(0, floor))
 }
 
+let pendingHeightTileRefresh: Promise<void> = Promise.resolve()
+
 export function handleServerMessage(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   raw: any,
@@ -522,6 +543,8 @@ export function handleServerMessage(
 
     case 'JoinSuccess': {
       resetFences()
+      resetHousePlacement()
+      resetEstateStorage()
       const serverPlayer: ServerPlayer = data.player
       console.log('Join successful, received player data:', serverPlayer)
       isAdminUser.set(data.is_admin === true)
@@ -1267,6 +1290,11 @@ export function handleServerMessage(
       break
     }
 
+    case 'PlayerMountChanged': {
+      updatePlayer(data.player_id, { mounted: data.mounted })
+      break
+    }
+
     case 'PlayerWetToggled': {
       const state = get(gameStore)
       if (state.currentPlayer?.id === data.player_id) {
@@ -1313,10 +1341,13 @@ export function handleServerMessage(
     }
 
     case 'LandClaimPrompt': {
+      resetHousePlacement()
       applyLandClaimPreview(data)
       break
     }
     case 'LandscapingMode':
+      stopEstateChestMode()
+      resetHousePlacement()
       openLandscapingMode(data)
       inventoryVisible.set(false)
       fenceError.set(null)
@@ -1363,6 +1394,28 @@ export function handleServerMessage(
     case 'FenceEditResult':
       fencePending.set(false)
       fenceError.set(data.error ?? null)
+      break
+    case 'EstateChestMode':
+      stopFenceMode()
+      estateChestMode.set(data)
+      inventoryVisible.set(false)
+      estateChestError.set(null)
+      break
+    case 'EstateChestVisibility':
+      applyEstateChestVisibility(data.added, data.removed)
+      break
+    case 'EstateChestEditResult':
+      estateChestPending.set(false)
+      estateChestError.set(data.error ?? null)
+      if (!data.error) estateChestMode.set(null)
+      break
+    case 'EstateChestState':
+      estateChestPending.set(false)
+      if (data.error) estateChestError.set(data.error)
+      if (data.state) {
+        inventoryVisible.set(false)
+        openEstateChest.set(data.state)
+      }
       break
 
     case 'LandClaimed': {
@@ -1557,13 +1610,59 @@ export function handleServerMessage(
       housingManager.handleRemoteHouseSpawned(data.house)
       break
 
+    case 'HousePlacementStarted':
+      landClaimDialog.set(null)
+      selectLandscapingTool('House')
+      openHousePlacement(
+        data.instance_id,
+        data.item_name,
+        data.house,
+        data.plots
+      )
+      break
+
+    case 'HousePlacementResult':
+      applyHousePlacementResult(data.error ?? null)
+      break
+
+    case 'HouseDemolitionResult':
+      applyHouseDemolitionResult(data.house_id, data.error ?? null)
+      break
+
     case 'HouseUpdated':
       housingManager.handleRemoteHouseSpawned(data.house)
       break
 
+    case 'HeightTilesInvalidated': {
+      const heightManager = get(editorHeightManager)
+      if (heightManager) {
+        pendingHeightTileRefresh = pendingHeightTileRefresh
+          .catch(() => {})
+          .then(() => heightManager.refreshTiles(data.tiles ?? []))
+        void pendingHeightTileRefresh.catch((error) =>
+          console.warn('Failed to refresh terrain height tiles:', error)
+        )
+      }
+      break
+    }
+
     case 'TreeTilesInvalidated': {
       const treeDataManager = get(editorTreeDataManager)
-      if (treeDataManager) void treeDataManager.refreshTiles(data.tiles ?? [])
+      if (treeDataManager) {
+        void pendingHeightTileRefresh
+          .catch(() => {})
+          .then(() => treeDataManager.refreshTiles(data.tiles ?? []))
+      }
+      break
+    }
+
+    case 'GrassTilesInvalidated': {
+      const grassDataManager = get(editorGrassDataManager)
+      if (grassDataManager) {
+        void pendingHeightTileRefresh
+          .catch(() => {})
+          .then(() => grassDataManager.refreshTiles(data.tiles ?? []))
+      }
       break
     }
 

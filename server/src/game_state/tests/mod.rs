@@ -21,9 +21,11 @@ mod combat_audit_tests;
 mod combat_tests;
 mod dungeon_tests;
 mod enchant_tests;
+mod estate_storage_tests;
 mod fence_tests;
 mod fishing_tests;
 mod friend_tests;
+mod house_building_tests;
 mod house_floor_tests;
 mod hunger_tests;
 mod instrument_tests;
@@ -32,6 +34,7 @@ mod land_tests;
 mod landscaping_tests;
 mod meal_tests;
 mod monster_ai_tests;
+mod mount_tests;
 mod movement_tests;
 mod party_tests;
 mod persistence_tests;
@@ -99,6 +102,7 @@ pub(super) fn make_player(id: &str, x: f32, z: f32) -> Player {
         client_kind: Default::default(),
         back_color: None,
         back_texture: None,
+        mounted: false,
         ready_at: 0,
     }
 }

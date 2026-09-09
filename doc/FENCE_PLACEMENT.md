@@ -53,5 +53,5 @@ SQLite `land_fences`는 `(x,z,axis,estate_id)`만 저장하며 기본 키는 `(x
 서버는 32m 구획으로 목책을 인덱싱하고, 접속·이동·설치·회수 시 주변 플레이어에게 변경분을 보낸다.
 브라우저는 인스턴스 렌더링을 사용하며, 브라우저 WASM과 NPC 클라이언트도 동일한 충돌을 적용한다.
 
-프로토콜 v58: `StartFenceMode`, `EditFence`, `LandscapingMode`, `FenceVisibility`, `FenceEditResult`.
+프로토콜 v62: `StartLandscapingMode { tool: Fence }`, `EditFence`, `LandscapingMode`, `FenceVisibility`, `FenceEditResult`.
 일반 가구 설치·회수와 영지 강제 해제 시 회수함 처리는 별도이며 [영지 설계](LAND_SYSTEM.md)를 따른다.

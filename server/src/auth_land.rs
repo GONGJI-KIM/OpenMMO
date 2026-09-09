@@ -38,6 +38,21 @@ pub struct OwnedLandPlot {
 }
 
 impl AuthService {
+    pub fn homestead_plots(&self, character_id: i64) -> Result<Vec<(i32, i32, u8)>, AuthError> {
+        let conn = self.open_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT p.tile_x, p.tile_z, p.quadrant FROM land_plots p
+             JOIN land_estates e ON e.id=p.estate_id
+             WHERE e.owner_id=?1 AND e.grade=1 ORDER BY p.rowid",
+        )?;
+        let plots = stmt
+            .query_map([character_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(plots)
+    }
+
     fn read_land_account(conn: &Connection, character_id: i64) -> Result<LandAccount, AuthError> {
         Ok(conn.query_row(
             "SELECT treasury, missed, free_months, (SELECT COUNT(*) FROM land_plots WHERE estate_id=e.id)

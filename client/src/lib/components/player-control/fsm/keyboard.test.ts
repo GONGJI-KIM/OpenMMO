@@ -27,6 +27,56 @@ function makeInput() {
   }
 }
 
+describe('mounted keyboard steering', () => {
+  it('moves along an arc and sends the requested facing to the server', () => {
+    const input = makeInput()
+    const result = applyKeyboardMovement({
+      ...input,
+      config: { ...DEFAULT_MOVEMENT_CONFIG, maxSpeed: 6, mountRotation: 0 },
+      deltaTimeSeconds: 0.1,
+    })
+    expect(result.kind).toBe('moved')
+    const position = input.writePlayerPosition.mock.calls[0][0]
+    expect(position.x).toBeCloseTo(0.65 * (1 - Math.cos(Math.PI / 12)))
+    expect(position.z).toBeCloseTo(0.65 * Math.sin(Math.PI / 12))
+    expect(input.writePlayerPosition.mock.calls[0][1]).toBeCloseTo(Math.PI / 12)
+    expect(input.sendPlayerMove).toHaveBeenCalledWith(
+      position,
+      Math.PI / 2,
+      true
+    )
+  })
+
+  it('sends redirects without distance and cancels a turn on release', () => {
+    const send = vi.fn()
+    const turn = vi.fn()
+    const sender = createKeyboardMoveSender(send, turn)
+    const position = { x: 0, y: 5, z: 0 }
+    sender.step({ ...position, z: 0.6 }, Math.PI / 2, true)
+    sender.step(position, Math.PI / 2, true)
+    sender.step(position, -Math.PI / 2, true)
+    sender.flush(position, 0.2)
+    expect(send).not.toHaveBeenCalled()
+    expect(turn.mock.calls).toEqual([
+      [Math.PI / 2],
+      [-Math.PI / 2],
+      [0.2, true],
+    ])
+  })
+
+  it('replaces the turn when forward travel resumes instead of replaying arc samples', () => {
+    const send = vi.fn()
+    const turn = vi.fn()
+    const sender = createKeyboardMoveSender(send, turn)
+    sender.step({ x: 0, y: 0, z: 0 }, Math.PI, true)
+    sender.step({ x: -0.5, y: 0, z: 0.6 }, Math.PI, true)
+    const resumed = { x: -1.3, y: 0, z: -0.1 }
+    sender.step(resumed, Math.PI, false)
+    expect(turn).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledExactlyOnceWith(resumed, Math.PI)
+  })
+})
+
 function outcomeActions(): KeyboardMovementOutcomeActions {
   return {
     stopMovement: vi.fn(),
@@ -286,7 +336,10 @@ describe('runKeyboardFrame', () => {
 
     expect(a.stopMovement).toHaveBeenCalledOnce()
     expect(a.emitKeyboardPlayerState).not.toHaveBeenCalled()
-    expect(moveSender.flush).toHaveBeenCalledExactlyOnceWith(position)
+    expect(moveSender.flush).toHaveBeenCalledExactlyOnceWith(
+      position,
+      undefined
+    )
   })
 
   it.each([
@@ -329,7 +382,10 @@ describe('runKeyboardFrame', () => {
       moveSender,
     })
 
-    expect(moveSender.flush).toHaveBeenCalledExactlyOnceWith(position)
+    expect(moveSender.flush).toHaveBeenCalledExactlyOnceWith(
+      position,
+      undefined
+    )
     expect(moveSender.reset).not.toHaveBeenCalled()
   })
 
@@ -353,7 +409,10 @@ describe('runKeyboardFrame', () => {
 
     expect(a.setKeyboardIdleRuntime).toHaveBeenCalledOnce()
     expect(a.emitKeyboardPlayerState).toHaveBeenCalledOnce()
-    expect(moveSender.flush).toHaveBeenCalledExactlyOnceWith(position)
+    expect(moveSender.flush).toHaveBeenCalledExactlyOnceWith(
+      position,
+      undefined
+    )
   })
 
   it('does not force idle from other states on idle frames', () => {

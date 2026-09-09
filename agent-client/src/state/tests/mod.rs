@@ -105,6 +105,7 @@ pub(crate) fn test_player(x: f32, z: f32) -> Player {
         object_id: None,
         last_combat_at: 0,
         client_kind: Default::default(),
+        mounted: false,
         ready_at: 0,
         back_color: None,
         back_texture: None,
@@ -245,6 +246,7 @@ pub(crate) fn house(id: &str, origin: Position, rooms: Vec<RoomData>) -> HouseDa
     HouseData {
         id: id.to_string(),
         owner_id: "test".to_string(),
+        source_scroll_id: None,
         origin,
         rooms,
         passability: Vec::new(),

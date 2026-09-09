@@ -46,6 +46,13 @@
 </script>
 
 <script lang="ts">
+  import { RiderMotion } from '../utils/riderMotion'
+  import { HorseReins } from '../utils/horseReins'
+  import {
+    HorseMount,
+    HORSE_MODEL_PATH,
+    RIDING_ANIMATION_PATH,
+  } from '../utils/horseMount'
   import { titleName } from '../data/titleDefs'
   import { T } from '@threlte/core'
   import TextLabel from './TextLabel.svelte'
@@ -72,6 +79,7 @@
     findBoneByName,
     getGltfAnimations,
     retargetOrderedCharacterAnimationsForModel,
+    retargetAnimationsForCharacterModel,
     selectOrderedCharacterAnimations,
   } from '../utils/characterAnimationUtils'
   import {
@@ -139,6 +147,7 @@
     playerState: PlayerStateName
     interactionAnim?: string
     interactionCounter?: number
+    mounted?: boolean
     interactOffsetY?: number
     attackCounter?: number
     hitCounter?: number
@@ -192,6 +201,7 @@
     playerState,
     interactionAnim,
     interactionCounter,
+    mounted = false,
     interactOffsetY = 0,
     attackCounter,
     hitCounter,
@@ -300,6 +310,56 @@
   let mixer = $state<THREE.AnimationMixer | null>(null)
   let currentAction = $state<THREE.AnimationAction | null>(null)
   let modelRoot = $state<THREE.Group | null>(null)
+  let horseMount = $state<HorseMount | null>(null)
+  let riderGroup = $state<THREE.Group | undefined>()
+  let ridingClip: THREE.AnimationClip | null = null
+  let riderMotion: RiderMotion | null = null
+  let horseReins: HorseReins | null = null
+  const seatPosition = new THREE.Vector3()
+  const riding = $derived(
+    mounted &&
+      health > 0 &&
+      playerState !== 'attack' &&
+      playerState !== 'interact'
+  )
+
+  $effect(() => {
+    const root = modelRoot
+    if (!riding || !root) return
+    let cancelled = false
+    let mount: HorseMount | null = null
+    void Promise.all([
+      loadGLB(HORSE_MODEL_PATH),
+      loadGLB(RIDING_ANIMATION_PATH),
+    ])
+      .then(async ([horse, rider]) => {
+        const clips = await retargetAnimationsForCharacterModel(
+          root,
+          rider.scene,
+          getGltfAnimations(rider)
+        )
+        if (cancelled) return
+        mount = new HorseMount(horse)
+        horseMount = mount
+        riderMotion = new RiderMotion(root)
+        horseReins = new HorseReins(mount.root, root)
+        ridingClip = clips.find((clip) => clip.name === 'ride') ?? null
+        playAnimationForState()
+      })
+      .catch((error) => console.error('Failed to load horse mount', error))
+    return () => {
+      cancelled = true
+      mount?.dispose()
+      horseReins?.dispose()
+      horseReins = null
+      riderMotion?.restore()
+      riderMotion = null
+      horseMount = null
+      ridingClip = null
+      if (riderGroup) riderGroup.position.set(0, 0, 0)
+      lastAnimKey = undefined
+    }
+  })
   let modelGroup = $state<THREE.Group | undefined>(undefined)
 
   let hoverProxyGroup = $state<THREE.Group | undefined>(undefined)
@@ -804,13 +864,19 @@
       interactionAnim === FishingAnimationName.CAST ||
       interactionAnim === FishingAnimationName.IDLE
     if (weaponObject) {
-      weaponObject.visible = playerState !== 'interact' || fishingInteraction
+      weaponObject.visible =
+        !riding && (playerState !== 'interact' || fishingInteraction)
     }
     if (offhandObject) {
-      offhandObject.visible = playerState !== 'interact'
+      offhandObject.visible = !riding && playerState !== 'interact'
     }
     if (torchFireGroup) {
-      torchFireGroup.visible = playerState !== 'interact'
+      torchFireGroup.visible = !riding && playerState !== 'interact'
+    }
+
+    if (riding && ridingClip) {
+      startAction(ridingClip, false)
+      return
     }
 
     const hasTorch = isTorchItemDefId(attachedOffhandItemId)
@@ -1158,7 +1224,17 @@
    *  early in places, which is why the two are not simply written in sequence
    *  at the call site. */
   export function update(deltaTime: number, wind: WindState | null = null) {
+    riderMotion?.restore()
     updatePose(deltaTime)
+    if (riding && horseMount) {
+      riderMotion?.apply(
+        horseMount.riderHipLift,
+        horseMount.riderHandLift,
+        horseMount.riderIdleWeight,
+        horseMount.riderFacingYaw
+      )
+      horseReins?.update()
+    }
     updateCape(deltaTime, wind)
   }
 
@@ -1191,8 +1267,9 @@
       _nametagPos.set(position.x, position.y + 2.2, position.z)
       const dist = camera.position.distanceTo(_nametagPos)
 
-      const minHeight = 2.0
-      const maxHeight = 2.5
+      const mountHeight = riding ? 0.9 : 0
+      const minHeight = 2.0 + mountHeight
+      const maxHeight = 2.5 + mountHeight
 
       nametagScale = billboardScale(dist)
       nametagHeight = minHeight + billboardZoomT(dist) * (maxHeight - minHeight)
@@ -1219,6 +1296,18 @@
       )
     }
 
+    if (horseMount && riderGroup && modelGroup) {
+      horseMount.update(
+        deltaTime,
+        playerState === 'moving' ? _speed : 0,
+        rotation
+      )
+      horseMount.seat.getWorldPosition(seatPosition)
+      riderGroup.position.copy(modelGroup.worldToLocal(seatPosition))
+      riderGroup.position.y += horseMount.riderBaseOffsetY
+    } else if (riderGroup) {
+      riderGroup.position.set(0, 0, 0)
+    }
     if (!mixer) return
 
     // Update debug info for slow mode
@@ -1242,7 +1331,11 @@
         const remainingTime = clip.duration - currentAction.time
 
         // Trigger next animation once when conditions are met (0.3 seconds remaining)
-        if (remainingTime <= OVERLAP_BEFORE_END && playerState === 'idle') {
+        if (
+          remainingTime <= OVERLAP_BEFORE_END &&
+          playerState === 'idle' &&
+          !riding
+        ) {
           playAnimationForState()
           return // Early return to prevent duplicate calls below
         }
@@ -1331,13 +1424,15 @@
     // Update animation state
     if (validAnimations.length > 0) {
       const animKey =
-        playerState === 'interact'
-          ? `interact:${interactionAnim}:${interactionCounter}`
-          : playerState === 'moving'
-            ? `moving:${movementMode}`
-            : playerState === 'attack'
-              ? `attack:${attackCounter}`
-              : playerState
+        riding && ridingClip
+          ? 'riding'
+          : playerState === 'interact'
+            ? `interact:${interactionAnim}:${interactionCounter}`
+            : playerState === 'moving'
+              ? `moving:${movementMode}`
+              : playerState === 'attack'
+                ? `attack:${attackCounter}`
+                : playerState
       if (lastAnimKey !== animKey) {
         lastAnimKey = animKey
         playAnimationForState()
@@ -1361,7 +1456,12 @@
     rotation={[0, rotation, 0]}
   >
     <!-- 3D Character Model with real animations -->
-    <T is={modelRoot} />
+    {#if horseMount}
+      <T is={horseMount.root} />
+    {/if}
+    <T.Group bind:ref={riderGroup}>
+      <T is={modelRoot} />
+    </T.Group>
   </T.Group>
 {/if}
 

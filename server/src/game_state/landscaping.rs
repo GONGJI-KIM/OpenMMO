@@ -7,6 +7,7 @@ use crate::{
     auth::AuthService,
     types::{PlayerId, ServerMessage},
 };
+use onlinerpg_shared::fence::FencePlot;
 use onlinerpg_shared::landscaping::{
     self, LandscapingStroke, LandscapingTile, LandscapingTool, CLEARED_BYTES, TOOLBOX_ITEM,
 };
@@ -77,13 +78,13 @@ impl GameState {
         }
     }
 
-    async fn try_start_landscaping_mode(
+    pub(crate) async fn try_start_landscaping_mode(
         &self,
         player_id: &PlayerId,
         auth: &AuthService,
         tool: LandscapingTool,
         is_admin: bool,
-    ) -> Result<(), &'static str> {
+    ) -> Result<Vec<FencePlot>, &'static str> {
         if self
             .reject_if_trading(player_id, "decorate your estate")
             .await
@@ -147,14 +148,14 @@ impl GameState {
             player_id,
             ServerMessage::LandscapingMode {
                 owner_id,
-                plots,
+                plots: plots.clone(),
                 palette,
                 has_toolbox,
                 tool,
             },
         )
         .await;
-        Ok(())
+        Ok(plots)
     }
 
     async fn learn_landscaping_palette(

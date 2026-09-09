@@ -73,7 +73,7 @@ struct Config {
     #[serde(default)]
     npcs: Vec<NpcConfig>,
 
-    /// Maximum number of concurrent LLM calls across all NPCs (min 1, default 2)
+    /// Maximum concurrent LLM calls across all NPCs (min 1, default 4).
     #[serde(default = "default_max_concurrent")]
     max_concurrent: usize,
 
@@ -169,7 +169,7 @@ pub fn default_activity_window_secs() -> u64 {
 }
 
 fn default_max_concurrent() -> usize {
-    2
+    4
 }
 
 fn default_request_timeout_secs() -> u64 {
@@ -497,6 +497,7 @@ pub fn msg_name(msg: &onlinerpg_shared::ServerMessage) -> &'static str {
         ServerMessage::Kicked { .. } => "Kicked",
         ServerMessage::ServerNotice { .. } => "ServerNotice",
         ServerMessage::PlayerTorchToggled { .. } => "PlayerTorchToggled",
+        ServerMessage::PlayerMountChanged { .. } => "PlayerMountChanged",
         ServerMessage::PlayerWetToggled { .. } => "PlayerWetToggled",
         ServerMessage::PlayerTitleChanged { .. } => "PlayerTitleChanged",
         ServerMessage::TitleEarned { .. } => "TitleEarned",
@@ -517,8 +518,13 @@ pub fn msg_name(msg: &onlinerpg_shared::ServerMessage) -> &'static str {
         ServerMessage::LandAccountState { .. } => "LandAccountState",
         ServerMessage::CapeTexturePrompt { .. } => "CapeTexturePrompt",
         ServerMessage::HouseSpawned { .. } => "HouseSpawned",
+        ServerMessage::HousePlacementStarted { .. } => "HousePlacementStarted",
+        ServerMessage::HousePlacementResult { .. } => "HousePlacementResult",
+        ServerMessage::HouseDemolitionResult { .. } => "HouseDemolitionResult",
         ServerMessage::HouseUpdated { .. } => "HouseUpdated",
+        ServerMessage::HeightTilesInvalidated { .. } => "HeightTilesInvalidated",
         ServerMessage::TreeTilesInvalidated { .. } => "TreeTilesInvalidated",
+        ServerMessage::GrassTilesInvalidated { .. } => "GrassTilesInvalidated",
         ServerMessage::HouseRemoved { .. } => "HouseRemoved",
         ServerMessage::HousesInArea { .. } => "HousesInArea",
         ServerMessage::DoorToggled { .. } => "DoorToggled",
@@ -579,6 +585,10 @@ pub fn msg_name(msg: &onlinerpg_shared::ServerMessage) -> &'static str {
         ServerMessage::DungeonReset => "DungeonReset",
         ServerMessage::CharacterRenameRequired { .. } => "CharacterRenameRequired",
         ServerMessage::CharacterRenamed { .. } => "CharacterRenamed",
+        ServerMessage::EstateChestMode { .. } => "EstateChestMode",
+        ServerMessage::EstateChestVisibility { .. } => "EstateChestVisibility",
+        ServerMessage::EstateChestEditResult { .. } => "EstateChestEditResult",
+        ServerMessage::EstateChestState { .. } => "EstateChestState",
     }
 }
 
@@ -597,10 +607,10 @@ mode = "google"
 "#;
 
     #[test]
-    fn max_concurrent_defaults_to_two() {
+    fn max_concurrent_defaults_to_four() {
         assert_eq!(
             parse("server = \"ws://127.0.0.1:10006\"\n").max_concurrent,
-            2
+            4
         );
     }
 

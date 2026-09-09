@@ -11,7 +11,7 @@ import {
   WORLD_MAX_X,
 } from './world-wrap'
 
-export type LandscapingTool = 'Ground' | 'Road' | 'Fence'
+export type LandscapingTool = 'Ground' | 'Road' | 'Fence' | 'House'
 
 export function snapBrushCoordinate(value: number, radius: number): number {
   return radius < 1 ? Math.round(value) : value

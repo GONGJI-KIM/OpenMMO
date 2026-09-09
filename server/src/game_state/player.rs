@@ -161,6 +161,7 @@ impl LayoutGrind {
 /// speed.
 #[derive(Clone)]
 pub(super) struct MoveIntent {
+    turn_only: bool,
     pub(super) target: Position,
     rotation: f32,
     pub(super) floor_level: i8,
@@ -957,6 +958,16 @@ impl super::GameState {
             removed: vec![],
         });
         drop(fences);
+        let estate_chests = self.estate_chests.read().await;
+        msgs.push(ServerMessage::EstateChestVisibility {
+            added: estate_chests
+                .nearby(&player_position, player_floor)
+                .into_iter()
+                .cloned()
+                .collect(),
+            removed: vec![],
+        });
+        drop(estate_chests);
         if !other_players.is_empty()
             || !monsters.is_empty()
             || !ground_items.is_empty()
@@ -1219,6 +1230,7 @@ impl super::GameState {
             );
         }
         queue.push_back(MoveIntent {
+            turn_only: false,
             target: new_position,
             rotation: new_rotation,
             floor_level,
@@ -1227,10 +1239,48 @@ impl super::GameState {
         });
     }
 
+    pub async fn stop_horse(&self, player_id: &PlayerId) {
+        let mut queues = self.movement_intents.write().await;
+        if self
+            .players
+            .read()
+            .await
+            .get(player_id)
+            .is_some_and(|p| p.mounted)
+        {
+            queues.remove(player_id);
+        }
+    }
+
+    pub async fn turn_horse(&self, player_id: &PlayerId, rotation: f32, sprinting: bool) {
+        if !rotation.is_finite() {
+            return;
+        }
+        let mut queues = self.movement_intents.write().await;
+        let players = self.players.read().await;
+        let Some(player) = players.get(player_id) else {
+            return;
+        };
+        if !player.mounted || player.health == 0 || Self::in_combat(player) {
+            return;
+        }
+        let queue = queues.entry(*player_id).or_default();
+        queue.clear();
+        queue.push_back(MoveIntent {
+            turn_only: true,
+            target: player.position,
+            rotation,
+            floor_level: player.floor_level,
+            check_collision: true,
+            sprinting,
+        });
+    }
+
     /// Advance every pending move queue by `dt` seconds of walking and
     /// broadcast the results. A tick's budget can span several short legs;
     /// consumed waypoints are popped in place, finished queues dropped.
     pub async fn tick_player_movement(&self, dt: f32) {
+        self.validate_horse_mounts().await;
         // Exactly the client's speed: headroom ran the sim to the leg end
         // ahead of the client, and monsters swung at that empty spot.
         let base_step = PLAYER_MOVE_SPEED * dt.max(0.0);
@@ -1264,29 +1314,98 @@ impl super::GameState {
                 let sprinting = waypoints
                     .front()
                     .is_some_and(|intent| intent.sprinting && sprint_allowed);
-                let max_step =
-                    base_step * hunger_mult * onlinerpg_shared::hunger::sprint_move_mult(sprinting);
+                let mount_mult = if player.mounted {
+                    onlinerpg_shared::world::HORSE_MOVE_MULT
+                } else {
+                    1.0
+                };
+                let max_step = base_step
+                    * hunger_mult
+                    * mount_mult
+                    * onlinerpg_shared::hunger::sprint_move_mult(sprinting);
                 let old_position = player.position;
                 let old_floor = player.floor_level;
                 let old_rotation = player.rotation;
                 let mut budget = max_step;
+                let mut time_left = dt.max(0.0);
+                let speed = max_step / dt.max(f32::EPSILON);
                 let mut blocked = false;
                 while let Some(intent) = waypoints.front() {
                     let target = &intent.target;
                     let dx = shortest_world_delta_x(player.position.x, target.x);
                     let dz = target.z - player.position.z;
                     let dist = (dx * dx + dz * dz).sqrt();
-                    let snap = dist <= budget;
-                    // Step in unwrapped X so a seam-crossing move stays a
-                    // short local sweep for the collision query.
-                    let (step_x, step_y, step_z) = if snap {
-                        (player.position.x + dx, target.y, target.z)
+                    let (step_x, step_y, step_z, facing, snap) = if player.mounted {
+                        use onlinerpg_shared::mount_movement::{
+                            angle_delta, arc_step, turn_duration, ARRIVAL_DISTANCE, STEP_SECONDS,
+                            TURN_RADIUS,
+                        };
+                        if time_left <= 1e-7 {
+                            break;
+                        }
+                        let desired = if intent.turn_only {
+                            intent.rotation
+                        } else if dist > 1e-5 {
+                            dx.atan2(dz)
+                        } else {
+                            player.rotation
+                        };
+                        let delta = angle_delta(player.rotation, desired).abs();
+                        let mut step_time = if delta < 1e-4 {
+                            time_left
+                        } else {
+                            time_left.min(STEP_SECONDS)
+                        };
+                        if intent.turn_only {
+                            step_time = step_time.min(turn_duration(delta));
+                        }
+                        let radius = if intent.turn_only {
+                            TURN_RADIUS
+                        } else {
+                            TURN_RADIUS.min(dist / 4.0)
+                        };
+                        let (arc_x, arc_z, rotation) =
+                            arc_step(player.rotation, desired, speed, step_time, radius);
+                        let snap = !intent.turn_only
+                            && (dist <= ARRIVAL_DISTANCE
+                                || (delta < 1e-4 && speed * step_time >= dist));
+                        time_left -= if snap && speed > 0.0 {
+                            step_time.min(dist / speed)
+                        } else {
+                            step_time
+                        };
+                        if snap {
+                            (player.position.x + dx, target.y, target.z, rotation, true)
+                        } else {
+                            let fraction = if dist > 1e-5 && !intent.turn_only {
+                                (arc_x.hypot(arc_z) / dist).min(1.0)
+                            } else {
+                                0.0
+                            };
+                            (
+                                player.position.x + arc_x,
+                                player.position.y + (target.y - player.position.y) * fraction,
+                                player.position.z + arc_z,
+                                rotation,
+                                intent.turn_only && angle_delta(rotation, desired).abs() < 1e-5,
+                            )
+                        }
+                    } else if dist <= budget {
+                        (
+                            player.position.x + dx,
+                            target.y,
+                            target.z,
+                            intent.rotation,
+                            true,
+                        )
                     } else {
                         let t = budget / dist;
                         (
                             player.position.x + dx * t,
                             player.position.y + (target.y - player.position.y) * t,
                             player.position.z + dz * t,
+                            intent.rotation,
+                            false,
                         )
                     };
                     // Edge-crossing subset of the client's continuous-mover
@@ -1296,20 +1415,35 @@ impl super::GameState {
                     if intent.check_collision {
                         let step_floor =
                             super::passability::authoritative_floor(&cache, &player.position);
-                        match super::passability::resolve_step(
-                            &cache,
-                            player.position.x,
-                            player.position.z,
-                            step_x,
-                            step_z,
-                            step_floor,
-                            player.position.y,
-                        ) {
+                        let outcome = if player.mounted {
+                            super::passability::wrapped_block_info(
+                                &cache,
+                                player.position.x,
+                                player.position.z,
+                                step_x,
+                                step_z,
+                                step_floor,
+                                player.position.y,
+                            )
+                            .map(super::passability::StepOutcome::Blocked)
+                            .unwrap_or(super::passability::StepOutcome::Clear)
+                        } else {
+                            super::passability::resolve_step(
+                                &cache,
+                                player.position.x,
+                                player.position.z,
+                                step_x,
+                                step_z,
+                                step_floor,
+                                player.position.y,
+                            )
+                        };
+                        match outcome {
                             super::passability::StepOutcome::Clear => {}
                             super::passability::StepOutcome::Slid(slid_x, slid_z) => {
                                 // The leg is unfinished: keep it queued so the
                                 // next tick resumes from the slid position.
-                                player.rotation = intent.rotation;
+                                player.rotation = facing;
                                 player.position = Position {
                                     x: wrap_world_x(slid_x),
                                     y: step_y,
@@ -1345,18 +1479,17 @@ impl super::GameState {
                             }
                         }
                     }
-                    player.rotation = intent.rotation;
+                    player.rotation = facing;
+                    player.position = Position {
+                        x: wrap_world_x(step_x),
+                        y: step_y,
+                        z: step_z,
+                    };
                     if snap {
-                        player.position = *target;
                         player.floor_level = intent.floor_level;
                         budget -= dist;
                         waypoints.pop_front();
-                    } else {
-                        player.position = Position {
-                            x: wrap_world_x(step_x),
-                            y: step_y,
-                            z: step_z,
-                        };
+                    } else if !player.mounted {
                         break;
                     }
                 }
@@ -2456,6 +2589,37 @@ impl super::GameState {
                     ServerMessage::FenceVisibility {
                         added: entered.into_iter().cloned().collect(),
                         removed: left.into_iter().map(|f| f.edge).collect(),
+                    },
+                )
+                .await;
+            }
+        }
+
+        {
+            let chests = self.estate_chests.read().await;
+            let mut candidates: HashMap<_, _> = chests
+                .nearby(old_position, old_floor)
+                .into_iter()
+                .map(|chest| (chest.id, chest))
+                .collect();
+            candidates.extend(
+                chests
+                    .nearby(&player.position, new_floor)
+                    .into_iter()
+                    .map(|chest| (chest.id, chest)),
+            );
+            let (left, entered) = aoi_diff(
+                candidates.into_values(),
+                |chest| (chest.position, chest.floor_level),
+                (old_position, old_floor),
+                (&player.position, new_floor),
+            );
+            if !left.is_empty() || !entered.is_empty() {
+                self.send_direct_message(
+                    player_id,
+                    ServerMessage::EstateChestVisibility {
+                        added: entered.into_iter().cloned().collect(),
+                        removed: left.into_iter().map(|chest| chest.id).collect(),
                     },
                 )
                 .await;

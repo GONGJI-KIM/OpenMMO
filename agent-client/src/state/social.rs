@@ -90,9 +90,7 @@ impl SharedState {
 
         for (pid, event) in arrived {
             self.seen_nearby_players.insert(pid);
-            self.push_ambient_event_quiet(event);
-            // A person arriving, not our own bookkeeping — urgent lane.
-            self.wake(EventUrgency::Urgent);
+            self.push_ambient_event(event);
         }
     }
 
@@ -119,19 +117,38 @@ impl SharedState {
         player_id.to_string()
     }
 
-    /// Remember a conversation line for the RECENT CONVERSATION prompt
-    /// section, stamped with the game clock so the LLM can judge staleness.
-    pub fn push_chat_history(&mut self, line: &str) {
-        let stamped = match (self.game_hour, self.game_minute) {
-            (Some(h), Some(m)) => format!("[{h:02}:{m:02}] {line}"),
-            _ => line.to_string(),
-        };
-        push_capped(&mut self.chat_history, stamped, MAX_CHAT_HISTORY);
-    }
-
-    /// Conversation lines already handled, oldest first.
+    /// Previously consumed context, oldest first.
     pub fn chat_history(&self) -> &VecDeque<String> {
         &self.chat_history
+    }
+
+    pub fn pending_chat(&self) -> &VecDeque<String> {
+        &self.pending_chat
+    }
+
+    pub(super) fn remember_conversation(&mut self, msg: &ServerMessage) {
+        if !matches!(
+            msg,
+            ServerMessage::ChatMessage { .. }
+                | ServerMessage::WhisperMessage { .. }
+                | ServerMessage::PartyChatMessage { .. }
+                | ServerMessage::PlayerMusicStarted { .. }
+        ) {
+            return;
+        }
+        if let Some(line) = crate::driver::format_event(self, msg) {
+            let stamped = match (self.game_hour, self.game_minute) {
+                (Some(h), Some(m)) => format!("[{h:02}:{m:02}] {line}"),
+                _ => line,
+            };
+            push_capped(&mut self.pending_chat, stamped, MAX_CHAT_HISTORY);
+        }
+    }
+
+    pub fn finish_conversation(&mut self) {
+        for line in self.pending_chat.drain(..) {
+            push_capped(&mut self.chat_history, line, MAX_CHAT_HISTORY);
+        }
     }
 
     /// Apply one favor delta from the LLM. Only a nearby human player

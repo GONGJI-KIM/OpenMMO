@@ -43,4 +43,4 @@ model = "gpt-5.4-mini"
 # request_timeout_secs = 120
 
 # 모든 NPC를 통틀어 동시에 진행할 LLM 호출 수.
-# max_concurrent = 2
+# max_concurrent = 4

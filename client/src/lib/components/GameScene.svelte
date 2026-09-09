@@ -37,8 +37,10 @@
   import GameSceneWindParticles from './game-scene/GameSceneWindParticles.svelte'
   import GameSceneHousingLayer from './game-scene/GameSceneHousingLayer.svelte'
   import GameSceneLandClaimLayer from './game-scene/GameSceneLandClaimLayer.svelte'
+  import GameSceneHousePlacementLayer from './game-scene/GameSceneHousePlacementLayer.svelte'
   import GameSceneFencesLayer from './game-scene/GameSceneFencesLayer.svelte'
   import GameSceneLandscapingLayer from './game-scene/GameSceneLandscapingLayer.svelte'
+  import GameSceneEstateChestsLayer from './game-scene/GameSceneEstateChestsLayer.svelte'
   import GameSceneDungeonLayer from './game-scene/GameSceneDungeonLayer.svelte'
   import { isUnderground } from '../stores/dungeonStore'
   import { damageTextPool } from '../effects/damage-text-pool'
@@ -1206,6 +1208,12 @@
   heightManager={terrainHeightManager}
   playerPosition={currentPlayer?.position ?? null}
 />
+<GameSceneHousePlacementLayer
+  heightManager={terrainHeightManager}
+  {terrainMeshes}
+  player={currentPlayer ?? null}
+  housingGroup={housingLayerRef?.getGroup() ?? null}
+/>
 <GameSceneFencesLayer
   heightManager={terrainHeightManager}
   {terrainMeshes}
@@ -1214,6 +1222,12 @@
 <GameSceneLandscapingLayer
   heightManager={terrainHeightManager}
   {terrainMeshes}
+  player={currentPlayer ?? null}
+/>
+<GameSceneEstateChestsLayer
+  heightManager={terrainHeightManager}
+  {terrainMeshes}
+  housingGroup={housingLayerRef?.getGroup()}
   player={currentPlayer ?? null}
 />
 
@@ -1292,6 +1306,7 @@
 {/if}
 
 <GameSceneFootprintsLayer
+  mounted={currentPlayer?.mounted}
   bind:this={footprintsRef}
   playerPosition={currentPlayer?.position ?? null}
   remotePlayers={remotePlayerManager.players}

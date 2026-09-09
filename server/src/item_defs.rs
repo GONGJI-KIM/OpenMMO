@@ -47,6 +47,15 @@ pub enum WeaponType {
     Torch,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthenticatedUseAction {
+    EstateStorage,
+    EstateFence,
+    LandClaim,
+    EstateReturn,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub struct ItemDefinition {
@@ -119,6 +128,8 @@ pub struct ItemDefinition {
     /// boot if it ever disagrees with the `use_effect` dispatch.
     #[serde(default)]
     pub consumable: bool,
+    #[serde(rename = "useAction", default)]
+    pub authenticated_use_action: Option<AuthenticatedUseAction>,
     /// Satiation restored when eaten (doc/HUNGER.md). Present on food and fish.
     #[serde(default)]
     pub nutrition: Option<u32>,
@@ -210,6 +221,7 @@ pub struct EatEffect {
 /// The effect produced by consuming a usable item via `use_item`, decided by
 /// the item's `category`. One place to extend when a new consumable lands.
 pub enum UseEffect {
+    ToggleMount,
     /// Restore HP by rolling the given dice notation.
     Heal(String),
     /// Restore satiation and regenerate HP from nutrition; `debuff` is
@@ -238,6 +250,8 @@ pub enum UseEffect {
     /// Bring a defeated user back where they fell with this percentage of
     /// their max HP (phoenix talisman).
     ReviveInPlace(u32),
+    /// Open placement mode for one of the fixed house scrolls.
+    PlaceHouse,
 }
 
 impl ItemDefinition {
@@ -383,6 +397,7 @@ impl ItemDefinition {
             }),
             "campfire_kit" => Some(UseEffect::PlaceCampfire),
             "return_scroll" => Some(UseEffect::TeleportTown),
+            "horse_reins" => Some(UseEffect::ToggleMount),
             "enchant_scroll" => Some(UseEffect::EnchantWeapon),
             "enchant_armor_scroll" => Some(UseEffect::EnchantArmor),
             "party_summon_scroll" => Some(UseEffect::SummonParty),
@@ -391,6 +406,7 @@ impl ItemDefinition {
             "cape_dye" => Some(UseEffect::PromptCapeDye),
             "cape_texture" => Some(UseEffect::PromptCapeTexture),
             "phoenix_talisman" => self.revive_hp_percent.map(UseEffect::ReviveInPlace),
+            "house_scroll" => Some(UseEffect::PlaceHouse),
             _ => None,
         }
     }
@@ -415,6 +431,29 @@ impl ItemDefs {
         let data = include_str!("../../data/items.json");
         let mut defs: HashMap<String, ItemDefinition> =
             serde_json::from_str(data).expect("Failed to parse items.json");
+
+        for storage in onlinerpg_shared::estate_storage::estate_storage_defs().values() {
+            let item = defs.get(&storage.id).unwrap_or_else(|| {
+                panic!("estate storage '{}' has no item definition", storage.id)
+            });
+            assert_eq!(
+                item.category.as_deref(),
+                Some("furniture"),
+                "estate storage '{}' must be furniture",
+                storage.id
+            );
+            assert!(
+                item.consumable,
+                "estate storage '{}' must be usable from the bag",
+                storage.id
+            );
+            assert_eq!(
+                item.authenticated_use_action,
+                Some(AuthenticatedUseAction::EstateStorage),
+                "estate storage '{}' must use the estate_storage action",
+                storage.id
+            );
+        }
 
         // A typo in `effects` would silently strip an item's whole point, so
         // resolve the tokens up front and fail the boot on an unknown one.
@@ -445,15 +484,22 @@ impl ItemDefs {
                 "item '{}' has a chestTier but is not chest-eligible equipment",
                 def.id
             );
-            // Land Deeds use the authenticated registration handler.
+            let authenticated_use = def.authenticated_use_action.is_some();
             assert!(
                 def.consumable
                     == (def.use_effect().is_some()
-                        || matches!(def.id.as_str(), "land_deed" | "wooden_fence")
+                        || authenticated_use
                         || onlinerpg_shared::landscaping::is_landscaping_item(&def.id)),
                 "item '{}': consumable flag out of step with its use handler",
                 def.id
             );
+            if def.authenticated_use_action == Some(AuthenticatedUseAction::EstateStorage) {
+                assert!(
+                    onlinerpg_shared::estate_storage::is_estate_storage_item(&def.id),
+                    "item '{}': estate_storage action needs an estate storage definition",
+                    def.id
+                );
+            }
             // `equip_item` moves a whole bag entry into the slot and equipped
             // rows save as quantity 1, so the rest of a stack would vanish.
             assert!(
@@ -638,6 +684,23 @@ mod tests {
         assert_eq!(sword.weapon_range(), None);
         assert_eq!(sword.ranged_ability(), None);
         assert!(!sword.is_two_handed());
+    }
+
+    #[test]
+    fn authenticated_item_use_is_data_driven() {
+        let defs = ItemDefs::load();
+        assert_eq!(
+            defs.get("storage_chest").unwrap().authenticated_use_action,
+            Some(AuthenticatedUseAction::EstateStorage)
+        );
+        assert_eq!(
+            defs.get("wooden_fence").unwrap().authenticated_use_action,
+            Some(AuthenticatedUseAction::EstateFence)
+        );
+        assert_eq!(
+            defs.get("land_deed").unwrap().authenticated_use_action,
+            Some(AuthenticatedUseAction::LandClaim)
+        );
     }
 
     #[test]

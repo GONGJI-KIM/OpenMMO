@@ -10,6 +10,7 @@ use axum::{
 };
 use onlinerpg_shared::housing::{HouseData, RoomType};
 use onlinerpg_terrain::{
+    grass::{remove_grass_in_rects, GrassRemovalStats},
     io::TerrainIO,
     trees::{remove_trees_in_rects, TreeRemovalStats},
 };
@@ -29,6 +30,25 @@ struct HousingRouteState {
 }
 
 const TREE_HOUSE_MARGIN: f32 = 2.0;
+const GRASS_HOUSE_MARGIN: f32 = 1.0;
+
+pub(crate) fn house_foundation_rects(house: &HouseData, margin: f32) -> Vec<[f32; 4]> {
+    house
+        .rooms
+        .iter()
+        .filter(|room| room.floor_level == 0 && room.room_type != RoomType::Stairwell)
+        .map(|room| {
+            let min_x = house.origin.x + room.local_x as f32;
+            let min_z = house.origin.z + room.local_z as f32;
+            [
+                min_x - margin,
+                min_z - margin,
+                min_x + room.size_x as f32 + margin,
+                min_z + room.size_z as f32 + margin,
+            ]
+        })
+        .collect()
+}
 
 pub fn housing_router(
     housing_io: Arc<HousingIO>,
@@ -88,14 +108,19 @@ async fn create_house(
     State(state): State<HousingRouteState>,
     Json(mut house): Json<HouseData>,
 ) -> Result<(StatusCode, Json<HouseData>), (StatusCode, String)> {
-    // Shape/bounds validation must precede the neighbor chunk scan (F-010)
     validate_house(&house).map_err(|msg| (StatusCode::BAD_REQUEST, msg))?;
 
-    let neighbors = load_neighbors(&state.housing, &house).await?;
     let (cx, cz) = world_to_chunk(house.origin.x, house.origin.z);
-    house.id = next_house_id(cx, cz, &neighbors);
+    let all_houses = state.housing.read_all_houses().await.map_err(|e| {
+        error!("Failed to read houses for ID allocation: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error".to_string(),
+        )
+    })?;
+    house.id = next_house_id(cx, cz, &all_houses);
 
-    validate_house_neighbors(&house, &neighbors).map_err(|msg| (StatusCode::BAD_REQUEST, msg))?;
+    validate_house_neighbors(&house, &all_houses).map_err(|msg| (StatusCode::BAD_REQUEST, msg))?;
 
     state.housing.write_house(&house).await.map_err(|e| {
         error!("Failed to write house {}: {}", house.id, e);
@@ -105,14 +130,19 @@ async fn create_house(
         )
     })?;
     state.game_state.passability_add_house(&house).await;
-    let tree_stats = remove_house_trees(&state.terrain, &house).await?;
+    let (tree_stats, grass_stats) = tokio::try_join!(
+        remove_house_trees(&state.terrain, &house),
+        remove_house_grass(&state.terrain, &house),
+    )?;
     broadcast_house_change(
         &state.game_state,
         &house,
         ServerMessage::HouseSpawned {
             house: house.clone(),
         },
+        &[],
         &tree_stats.changed_tiles,
+        &grass_stats.changed_tiles,
     )
     .await;
     Ok((StatusCode::CREATED, Json(house)))
@@ -128,28 +158,50 @@ async fn update_house(
     }
     house.id = house_id;
 
+    let previous = state
+        .housing
+        .find_house(&house.id)
+        .await
+        .map_err(|e| {
+            error!("Failed to find house {} for update: {}", house.id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error".to_string(),
+            )
+        })?
+        .ok_or((StatusCode::NOT_FOUND, "house not found".to_string()))?;
+
     validate_house(&house).map_err(|msg| (StatusCode::BAD_REQUEST, msg))?;
 
     let neighbors = load_neighbors(&state.housing, &house).await?;
 
     validate_house_neighbors(&house, &neighbors).map_err(|msg| (StatusCode::BAD_REQUEST, msg))?;
 
-    state.housing.write_house(&house).await.map_err(|e| {
-        error!("Failed to write house {}: {}", house.id, e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Internal server error".to_string(),
-        )
-    })?;
+    state
+        .housing
+        .replace_house(&previous, &house)
+        .await
+        .map_err(|e| {
+            error!("Failed to write house {}: {}", house.id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error".to_string(),
+            )
+        })?;
     state.game_state.passability_add_house(&house).await;
-    let tree_stats = remove_house_trees(&state.terrain, &house).await?;
+    let (tree_stats, grass_stats) = tokio::try_join!(
+        remove_house_trees(&state.terrain, &house),
+        remove_house_grass(&state.terrain, &house),
+    )?;
     broadcast_house_change(
         &state.game_state,
         &house,
         ServerMessage::HouseUpdated {
             house: house.clone(),
         },
+        &[],
         &tree_stats.changed_tiles,
+        &grass_stats.changed_tiles,
     )
     .await;
     Ok(Json(house))
@@ -244,24 +296,11 @@ async fn delete_house(
     }
 }
 
-async fn remove_house_trees(
+pub(crate) async fn remove_house_trees(
     terrain: &TerrainIO,
     house: &HouseData,
 ) -> Result<TreeRemovalStats, (StatusCode, String)> {
-    let rects: Vec<[f32; 4]> = house
-        .rooms
-        .iter()
-        .filter(|room| room.floor_level == 0 && room.room_type != RoomType::Stairwell)
-        .map(|room| {
-            let min_x = house.origin.x + room.local_x as f32 - TREE_HOUSE_MARGIN;
-            let min_z = house.origin.z + room.local_z as f32 - TREE_HOUSE_MARGIN;
-            let max_x =
-                house.origin.x + room.local_x as f32 + room.size_x as f32 + TREE_HOUSE_MARGIN;
-            let max_z =
-                house.origin.z + room.local_z as f32 + room.size_z as f32 + TREE_HOUSE_MARGIN;
-            [min_x, min_z, max_x, max_z]
-        })
-        .collect();
+    let rects = house_foundation_rects(house, TREE_HOUSE_MARGIN);
 
     // An empty rect set yields zeroed stats from `remove_trees_in_rects`, so no
     // early return is needed here.
@@ -283,11 +322,37 @@ async fn remove_house_trees(
     Ok(stats)
 }
 
-async fn broadcast_house_change(
+pub(crate) async fn remove_house_grass(
+    terrain: &TerrainIO,
+    house: &HouseData,
+) -> Result<GrassRemovalStats, (StatusCode, String)> {
+    let rects = house_foundation_rects(house, GRASS_HOUSE_MARGIN);
+
+    let stats = remove_grass_in_rects(terrain, &rects).await.map_err(|e| {
+        error!("Failed to remove grass under house {}: {}", house.id, e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error".to_string(),
+        )
+    })?;
+
+    if stats.grass_removed > 0 {
+        info!(
+            "Removed {} grass instance(s) under house {} across {} tile(s)",
+            stats.grass_removed, stats.tiles_changed, house.id
+        );
+    }
+
+    Ok(stats)
+}
+
+pub(crate) async fn broadcast_house_change(
     game_state: &GameState,
     house: &HouseData,
     house_msg: ServerMessage,
+    changed_height_tiles: &[(i32, i32)],
     changed_tree_tiles: &[(i32, i32)],
+    changed_grass_tiles: &[(i32, i32)],
 ) {
     game_state
         .send_direct_message_to_players_within_position(
@@ -301,15 +366,24 @@ async fn broadcast_house_change(
         )
         .await;
 
-    if !changed_tree_tiles.is_empty() {
+    let invalidations = [
+        (!changed_height_tiles.is_empty()).then(|| ServerMessage::HeightTilesInvalidated {
+            tiles: changed_height_tiles.to_vec(),
+        }),
+        (!changed_tree_tiles.is_empty()).then(|| ServerMessage::TreeTilesInvalidated {
+            tiles: changed_tree_tiles.to_vec(),
+        }),
+        (!changed_grass_tiles.is_empty()).then(|| ServerMessage::GrassTilesInvalidated {
+            tiles: changed_grass_tiles.to_vec(),
+        }),
+    ];
+    for message in invalidations.into_iter().flatten() {
         game_state
             .send_direct_message_to_players_within_position(
                 &house.origin,
                 0,
                 EVENT_DELIVERY_RADIUS,
-                ServerMessage::TreeTilesInvalidated {
-                    tiles: changed_tree_tiles.to_vec(),
-                },
+                message,
                 None,
             )
             .await;
