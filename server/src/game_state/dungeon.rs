@@ -161,7 +161,8 @@ pub(super) struct DungeonMonsterRef {
 }
 
 fn monster_respawn_ms(player_count: usize) -> u64 {
-    MONSTER_RESPAWN_MS_BY_PLAYER_COUNT[player_count.saturating_sub(1).min(4)]
+    let index = player_count.clamp(1, MONSTER_RESPAWN_MS_BY_PLAYER_COUNT.len()) - 1;
+    MONSTER_RESPAWN_MS_BY_PLAYER_COUNT[index]
 }
 
 fn dungeon_depth_band(depth: u8) -> std::ops::RangeInclusive<u8> {
@@ -1630,15 +1631,15 @@ impl GameState {
             index.remove(monster_id)
         };
         let entry = entry?;
-        let respawn_ms = if entry.is_boss {
+        let respawn_at_ms = if entry.is_boss {
             BOSS_RESPAWN_NEVER
         } else {
-            monster_respawn_ms(
+            let respawn_ms = monster_respawn_ms(
                 self.dungeon_band_population(&entry.entrance_id, entry.depth)
                     .await,
-            )
+            );
+            Self::now_ms() + respawn_ms
         };
-        let now = Self::now_ms();
 
         let total = {
             let mut dungeons = self.dungeons.write().await;
@@ -1646,11 +1647,7 @@ impl GameState {
             let total = rt.layouts.len() as u8;
             let slot = rt.floors.get_mut(&entry.depth)?.slots.get_mut(entry.slot)?;
             slot.alive_monster_id = None;
-            slot.respawn_at_ms = if entry.is_boss {
-                respawn_ms
-            } else {
-                now + respawn_ms
-            };
+            slot.respawn_at_ms = respawn_at_ms;
             total
         };
         if entry.is_boss {

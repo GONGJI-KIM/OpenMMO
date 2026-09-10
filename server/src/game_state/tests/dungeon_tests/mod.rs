@@ -5,6 +5,7 @@ mod chest_tests;
 mod discovery_tests;
 mod door_tests;
 mod monster_tests;
+mod respawn_tests;
 
 /// Give `player_id` an empty bag, plus one `item_def_id` when given.
 async fn give_bag(game_state: &GameState, player_id: &PlayerId, item_def_id: Option<&str>) {
