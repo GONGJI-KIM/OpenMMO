@@ -1,15 +1,5 @@
-//! One walker, for every walk the agent takes.
-//!
-//! There used to be two — one for a fixed place, one for a moving target —
-//! and each had grown its own answer to the same questions: what to do when
-//! A* finds no route, when the server snaps us back, when a shut door stands
-//! in the way. Every disagreement was a bug. The chase ignored position
-//! corrections outright; the commute, given no route, sent nothing at all and
-//! froze the body, since the server only reconciles the two sims off a step
-//! it can refuse.
-//!
-//! What a walk is for now lives entirely in [`WalkTo`] and its [`Tuning`]
-//! row; the loop is the same one either way.
+//! Shared walking, door handling, and position correction for fixed and moving targets.
+//! [`WalkTo`] and [`Tuning`] define arrival and retry behavior.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -432,9 +422,7 @@ pub(super) async fn walk(
                 });
             }
         }
-        // On the surface, inch toward it anyway. The ground may simply be
-        // un-pathable rather than walled, and either way the server needs a
-        // step it can refuse before it will tell us where we really are.
+        // Try a clear surface step, preserving correction requests from sealed cells.
         match nudge(state, goal, tuning.step_stop_dist, background, sprint).await {
             Step::Sent(ms) => tokio::time::sleep(Duration::from_millis(ms.max(50))).await,
             Step::Error => return Walked::Error,
@@ -504,8 +492,7 @@ async fn step_along(
     Step::Nothing
 }
 
-/// One direct step toward `goal`, stopping `stop_dist` short of it — the
-/// fall-through for when A* has no leg to walk.
+/// Fallback step when A* has no leg, respecting known obstacles except for sealed-cell rescue.
 async fn nudge(
     state: &Arc<Mutex<SharedState>>,
     goal: (f32, f32),
@@ -524,16 +511,19 @@ async fn nudge(
     let dist = (to_goal.dist - stop_dist).min(MAX_STEP_DIST);
     let ratio = dist / to_goal.dist;
     let floor = s.passability_floor();
+    let (x, z) = (me.x + to_goal.dx * ratio, me.z + to_goal.dz * ratio);
+    {
+        let world = s.world_cache.read().unwrap();
+        let cache = world.passability_cache();
+        if pathfinding::is_movement_blocked(cache, me.x, me.z, x, z, floor, None)
+            && world.is_walkable(me.x, me.z, floor)
+        {
+            return Step::Nothing;
+        }
+    }
     let turn_ms = s.mount_turn_delay_ms(to_goal.rotation());
     match s
-        .send_step(
-            me.x + to_goal.dx * ratio,
-            me.z + to_goal.dz * ratio,
-            floor,
-            to_goal.rotation(),
-            background,
-            sprint,
-        )
+        .send_step(x, z, floor, to_goal.rotation(), background, sprint)
         .await
     {
         Ok(sprinting) => {
@@ -724,7 +714,143 @@ fn closed_doors_on_our_floor(s: &SharedState) -> Vec<DoorCandidate> {
 mod tests {
     use super::*;
     use crate::state::tests::{test_player, test_state};
+    use onlinerpg_shared::fence::{Fence, FenceAxis, FenceEdge};
     use onlinerpg_shared::housing::{HouseData, PassabilityGrid};
+    use onlinerpg_shared::ServerMessage;
+
+    fn fenced_in_at(
+        x: f32,
+        z: f32,
+        mounted: bool,
+    ) -> (SharedState, tokio::sync::mpsc::Receiver<ClientMessage>) {
+        let (mut state, rx) = test_state();
+        let mut player = test_player(x, z);
+        player.mounted = mounted;
+        state.push_event(ServerMessage::JoinSuccess {
+            player,
+            is_admin: false,
+        });
+        let horizontal = (-1372..-1345).flat_map(|x| {
+            [4480, 4512].map(|z| FenceEdge {
+                x,
+                z,
+                axis: FenceAxis::X,
+            })
+        });
+        let vertical = (4480..4512).flat_map(|z| {
+            [-1372, -1345].map(|x| FenceEdge {
+                x,
+                z,
+                axis: FenceAxis::Z,
+            })
+        });
+        state.push_event(ServerMessage::FenceVisibility {
+            added: horizontal
+                .chain(vertical)
+                .map(|edge| Fence {
+                    edge,
+                    y: 0.5,
+                    owner_id: 1,
+                })
+                .collect(),
+            removed: vec![],
+        });
+        (state, rx)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unreachable_walks_do_not_nudge_through_known_fences() {
+        for mounted in [false, true] {
+            for (start, goal) in [
+                ((-1371.8, 4511.4), (-1380.5, 4518.5)),
+                ((-1371.1, 4480.1), (-1380.5, 4473.5)),
+                ((-1361.507, 4507.2217), (-1380.5, 4518.5)),
+                ((-1361.507, 4507.2217), (-1380.5, 4473.5)),
+            ] {
+                let (s, mut rx) = fenced_in_at(start.0, start.1, mounted);
+                let path = s.find_path_to(goal.0, goal.1, 0);
+                assert!(!path.found);
+                let closest = path.waypoints.last().map_or(start, |wp| (wp.x, wp.z));
+                assert!(s.cell_open(start.0, start.1, 0));
+                let world_cache = s.world_cache.clone();
+                let state = Arc::new(Mutex::new(s));
+                let mut previous = start;
+                for _ in 0..2 {
+                    let to = WalkTo::Place {
+                        x: goal.0,
+                        z: goal.1,
+                        floor: 0,
+                    };
+                    let walking = tokio::time::timeout(
+                        Duration::from_secs(120),
+                        walk(&state, &to, false, Some(false)),
+                    );
+                    tokio::pin!(walking);
+                    let result = loop {
+                        tokio::select! {
+                            biased;
+                            Some(command) = rx.recv() => {
+                                let ClientMessage::PlayerMove { position, .. } = command else {
+                                    panic!("unexpected command: {command:?}");
+                                };
+                                let world = world_cache.read().unwrap();
+                                assert!(
+                                    !pathfinding::is_movement_blocked(
+                                        world.passability_cache(),
+                                        previous.0,
+                                        previous.1,
+                                        position.x,
+                                        position.z,
+                                        0,
+                                        None,
+                                    ),
+                                    "blocked step from {previous:?} to {position:?}",
+                                );
+                                previous = (position.x, position.z);
+                            },
+                            result = &mut walking => break result.unwrap(),
+                        }
+                    };
+                    assert_eq!(result, Walked::Lost(LostReason::NoPath));
+                    let s = state.lock().await;
+                    let me = s.self_player.as_ref().unwrap();
+                    assert_eq!((me.position.x, me.position.z), previous);
+                    assert_eq!(previous, closest);
+                }
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_blocked_approach_waits_for_the_target_to_become_reachable() {
+        let (mut s, mut rx) = fenced_in_at(-1371.8, 4511.4, false);
+        let mut target = test_player(-1380.5, 4518.5);
+        target.id = PlayerId::from(2);
+        let target_id = target.id;
+        s.nearby_players.insert(target_id, target);
+        let state = Arc::new(Mutex::new(s));
+        let to = WalkTo::Character(&target_id);
+        let walking = walk(&state, &to, false, Some(false));
+        tokio::pin!(walking);
+        tokio::select! {
+            biased;
+            result = &mut walking => panic!("approach ended while waiting: {result:?}"),
+            command = rx.recv() => panic!("approach crossed a known fence: {command:?}"),
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+        }
+        {
+            let mut s = state.lock().await;
+            let position = s.self_player.as_ref().unwrap().position;
+            s.nearby_players.get_mut(&target_id).unwrap().position = position;
+        }
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), walking)
+                .await
+                .unwrap(),
+            Walked::Arrived,
+        );
+        assert!(rx.try_recv().is_err());
+    }
 
     /// A block of cells walled on every edge: A* will not leave one.
     fn boxed_in(x: f32, z: f32, floor_level: u8) -> HouseData {
@@ -769,12 +895,9 @@ mod tests {
         (Arc::new(Mutex::new(s)), rx)
     }
 
-    /// A walk A* cannot route must still put a step on the wire: the server
-    /// reconciles the two sims off a step it refuses — its correction and its
-    /// sealed-cell rescue both need one — so silence freezes the body while
-    /// the caller reissues the same walk forever.
+    // A refused step triggers the server's sealed-cell rescue and position correction.
     #[tokio::test(start_paused = true)]
-    async fn a_walk_with_no_route_still_steps() {
+    async fn a_walk_from_a_sealed_cell_still_requests_correction() {
         let (state, mut rx) = boxed_in_at(0.5, 0.5, 0).await;
         let floor = state.lock().await.passability_floor();
         let to = WalkTo::Place {
