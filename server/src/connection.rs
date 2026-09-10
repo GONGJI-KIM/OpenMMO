@@ -1752,6 +1752,15 @@ async fn handle_client_message(
             }
         }
 
+        ClientMessage::SetItemLocked {
+            instance_id,
+            locked,
+        } => {
+            if let Some(id) = &state.player_id {
+                game_state.set_item_locked(id, instance_id, locked).await;
+            }
+        }
+
         ClientMessage::DropItem { instance_id } => {
             if let Some(id) = &state.player_id {
                 game_state.drop_item(id, instance_id).await;

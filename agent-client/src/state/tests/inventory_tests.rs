@@ -6,6 +6,7 @@ use super::*;
 fn selling_off_a_stack_leaves_the_rest_of_it_reachable() {
     let (mut s, _rx) = test_state();
     s.self_bag = vec![onlinerpg_shared::inventory::ItemInstance {
+        locked: false,
         instance_id: 7,
         item_def_id: "healing_potion".to_string(),
         quantity: 3,
@@ -43,6 +44,7 @@ fn fragmented_stacks_are_gathered_across_every_instance() {
     let (mut s, _rx) = test_state();
     s.self_bag = vec![
         onlinerpg_shared::inventory::ItemInstance {
+            locked: false,
             instance_id: 1,
             item_def_id: "old_boot".to_string(),
             quantity: 1,
@@ -51,6 +53,7 @@ fn fragmented_stacks_are_gathered_across_every_instance() {
             cape_texture: None,
         },
         onlinerpg_shared::inventory::ItemInstance {
+            locked: false,
             instance_id: 2,
             item_def_id: "old_boot".to_string(),
             quantity: 1,
@@ -78,6 +81,7 @@ fn worn_only_item_is_not_a_bag_copy() {
     s.self_equipped.insert(
         onlinerpg_shared::inventory::EquipSlot::MainHand,
         onlinerpg_shared::inventory::ItemInstance {
+            locked: false,
             instance_id: 9,
             item_def_id: "iron_sword".to_string(),
             quantity: 1,

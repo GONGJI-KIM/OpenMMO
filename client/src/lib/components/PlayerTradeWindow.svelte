@@ -48,7 +48,9 @@
   const available = $derived(
     ($inventoryStore?.bag ?? []).map((item) => ({
       item,
-      free: item.quantity - reservedQuantity(trade, item.instance_id),
+      free: item.locked
+        ? 0
+        : item.quantity - reservedQuantity(trade, item.instance_id),
     }))
   )
 
@@ -103,7 +105,7 @@
   function startAdd(instanceId: number, free: number) {
     if (locked || free <= 0) return
     const item = $inventoryStore?.bag.find((i) => i.instance_id === instanceId)
-    if (!item) return
+    if (!item || item.locked) return
     const def = getItemDef(item.item_def_id)
     if (free === 1) {
       offerItem(instanceId, 1)
@@ -180,7 +182,9 @@
                 class="row"
                 disabled={locked}
                 onclick={() => removeOne(entry)}
-                use:itemTooltip={def ? { def, side: 'right' } : null}
+                use:itemTooltip={def
+                  ? { def, enchant: entry.enchant, side: 'right' }
+                  : null}
               >
                 <img
                   class="item-icon"
@@ -258,7 +262,7 @@
                 class="row"
                 disabled={free <= 0}
                 onclick={() => startAdd(item.instance_id, free)}
-                use:itemTooltip={def ? { def, side: 'right' } : null}
+                use:itemTooltip={def ? { def, item, side: 'right' } : null}
               >
                 <img
                   class="item-icon"
@@ -269,7 +273,9 @@
                 <span class="item-name">
                   {itemDisplayName(item.item_def_id, item.enchant)}
                 </span>
-                <span class="qty">{free}/{item.quantity}</span>
+                <span class="qty"
+                  >{item.locked ? 'Locked' : `${free}/${item.quantity}`}</span
+                >
               </button>
             </li>
           {:else}

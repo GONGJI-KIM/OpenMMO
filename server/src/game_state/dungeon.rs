@@ -421,7 +421,12 @@ impl GameState {
                 return;
             };
             for depth in locked_depths(total) {
-                super::inventory::draw_from_bag(&mut inv.bag, &entrance.key_item_id(depth), 1);
+                super::inventory::draw_from_bag(
+                    &mut inv.bag,
+                    &entrance.key_item_id(depth),
+                    1,
+                    true,
+                );
             }
             inv.clone()
         };

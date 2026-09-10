@@ -81,6 +81,7 @@ async fn dirty_save_is_retried_after_failure() {
     assert_eq!(
         auth.load_inventory(record.id).unwrap(),
         vec![crate::auth::ItemRow {
+            locked: false,
             item_def_id: "torch".to_string(),
             quantity: 1,
             equip_slot: None,
@@ -109,6 +110,7 @@ async fn kick_flushes_dropped_inventory_before_replacement_load() {
         &[(
             char_id,
             vec![crate::auth::ItemRow {
+                locked: false,
                 item_def_id: "worn_iron_sword".to_string(),
                 quantity: 1,
                 equip_slot: None,
@@ -257,6 +259,7 @@ fn item_row(
     enchant: i32,
 ) -> crate::auth::ItemRow {
     crate::auth::ItemRow {
+        locked: false,
         item_def_id: item_def_id.to_string(),
         quantity,
         equip_slot: equip_slot.map(|s| s.to_string()),
@@ -298,6 +301,7 @@ async fn a_dyed_cape_loads_back_dyed() {
     let (game_state, p) = load_saved_inventory(
         "dyed_cape_reload",
         vec![crate::auth::ItemRow {
+            locked: false,
             item_def_id: "wool_cape".to_string(),
             quantity: 1,
             equip_slot: Some("back".to_string()),

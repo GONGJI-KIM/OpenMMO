@@ -147,7 +147,8 @@ pub const NPC_TOKEN_FILENAME: &str = "npc_token";
 /// v66: bold fishing bonus chance and second-fish outcome.
 /// v67: pre-rolled trophy fights replace the second-fish bonus.
 /// v68: consignment stalls replace the stall entry to player trades.
-pub const PROTOCOL_VERSION: u32 = 68;
+/// v69: persistent item locks and SetItemLocked.
+pub const PROTOCOL_VERSION: u32 = 69;
 
 /// Fingerprint of the dungeon layout generator this build compiled, stamped by
 /// `build.rs`. Layouts never travel the wire — both sides generate them from

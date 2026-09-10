@@ -33,6 +33,87 @@ async fn horse_reins_toggle_without_consumption_and_broadcast() {
 }
 
 #[tokio::test]
+async fn switching_to_bow_while_riding_preserves_enchanted_sword_after_reload() {
+    let game = make_test_game_state("horse_weapon_swap");
+    let auth = make_test_auth("horse_weapon_swap");
+    let account = auth.login_npc("npc_horse_weapon_swap").unwrap();
+    let record = create_test_character(&auth, &account, "Rider");
+    let id = rider(&game).await;
+    game.register_player_character(
+        &id,
+        record.id,
+        record.xp,
+        attrs_with_cha(12),
+        record.gold,
+        None,
+    )
+    .await;
+    let sword = ItemInstance {
+        enchant: 5,
+        ..bag_item(2, "steel_longsword", 1)
+    };
+    let shield = bag_item(3, "wooden_shield", 1);
+    {
+        let mut inventories = game.inventories.write().await;
+        let inv = inventories.get_mut(&id).unwrap();
+        inv.equipped.insert(EquipSlot::MainHand, sword.clone());
+        inv.equipped.insert(EquipSlot::OffHand, shield.clone());
+        inv.bag.push(bag_item(4, "bow", 1));
+        inv.bag.push(bag_item(5, "iron_arrow", 200));
+        inv.bag
+            .extend((6..56).map(|n| bag_item(n, "iron_sword", 1)));
+    }
+    game.use_item(&id, 1).await;
+    game.update_player_position(&id, move_cmd(pos(20.0), false), false)
+        .await;
+    game.tick_player_movement(0.2).await;
+    let before_swap = game.players.read().await[&id].position;
+    let mut rx = game.register_direct_channel(&id).await;
+
+    game.equip_item(&id, 4).await;
+    game.tick_player_movement(0.2).await;
+
+    assert!(game.players.read().await[&id].mounted);
+    assert!(
+        game.players.read().await[&id]
+            .position
+            .dist_xz_sq(&before_swap)
+            > 0.0
+    );
+    let inv = game.get_player_inventory(&id).await.unwrap();
+    assert_eq!(inv.bag.len(), 54);
+    assert!(inv.bag.contains(&sword));
+    assert!(inv.bag.contains(&shield));
+    assert_eq!(inv.equipped[&EquipSlot::MainHand].item_def_id, "bow");
+    assert!(!inv.equipped.contains_key(&EquipSlot::OffHand));
+    assert_eq!(inv.active_ammo.as_deref(), Some("iron_arrow"));
+    assert!(game.ground_items.read().await.is_empty());
+    assert!(drain(&mut rx).iter().any(|message| matches!(
+        message,
+        ServerMessage::InventoryUpdated { inventory } if inventory.bag.contains(&sword)
+    )));
+
+    game.flush_dirty_saves(&auth).await;
+    game.take_player_inventory(&id).await.unwrap();
+    game.load_player_inventory(&id, record.id, &auth).await;
+    let reloaded = game.get_player_inventory(&id).await.unwrap();
+    assert_eq!(reloaded.bag.len(), inv.bag.len());
+    let swords: Vec<_> = reloaded
+        .bag
+        .iter()
+        .filter(|item| item.item_def_id == "steel_longsword")
+        .collect();
+    assert_eq!(swords.len(), 1);
+    assert_eq!(swords[0].enchant, 5);
+    assert_eq!(swords[0].quantity, 1);
+    let sword_id = swords[0].instance_id;
+    game.equip_item(&id, sword_id).await;
+    let restored = game.get_player_inventory(&id).await.unwrap();
+    assert_eq!(restored.equipped[&EquipSlot::MainHand].enchant, 5);
+    assert!(restored.bag.iter().any(|item| item.item_def_id == "bow"));
+}
+
+#[tokio::test]
 async fn horse_movement_is_three_times_as_fast_and_losing_reins_dismounts() {
     let game = make_test_game_state("horse_speed");
     let id = rider(&game).await;

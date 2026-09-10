@@ -12,6 +12,7 @@ fn insert(
     stack_into_bag(
         bag,
         BagInsert {
+            locked: false,
             stackable,
             item_def_id: def,
             enchant,
@@ -21,6 +22,7 @@ fn insert(
             cape_texture: None,
         },
     )
+    .ids_used
 }
 
 #[test]
@@ -37,6 +39,207 @@ fn stack_into_bag_merges_only_same_def_and_enchant() {
     assert_eq!(bag[0].quantity, 2);
     assert_eq!(bag[1].enchant, 1);
     assert_eq!(bag[1].quantity, 1);
+}
+
+#[test]
+fn locked_stacks_do_not_merge_with_unlocked_items() {
+    let mut bag = vec![ItemInstance {
+        locked: true,
+        ..bag_item(1, "apple", 3)
+    }];
+    insert(&mut bag, true, "apple", 0, 2, 2);
+    assert_eq!(bag.len(), 2);
+    assert_eq!(bag[0].quantity, 3);
+    assert!(bag[0].locked);
+    let mut locked = BagInsert::one(true, "apple", 0, 3);
+    locked.locked = true;
+    stack_into_bag(&mut bag, locked);
+    assert_eq!(bag.len(), 2);
+    assert_eq!(bag[0].quantity, 4);
+    assert_eq!(bag[1].quantity, 2);
+}
+
+#[tokio::test]
+async fn ground_item_audit_links_single_and_batch_drops_to_merged_pickups() {
+    use tracing::instrument::WithSubscriber;
+    #[derive(Clone)]
+    struct LogWriter(Arc<std::sync::Mutex<Vec<u8>>>);
+    impl std::io::Write for LogWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let game = make_test_game_state("item_audit");
+    let id = pid("keeper");
+    game.add_player(make_player("keeper", 0.0, 0.0)).await;
+    game.register_player_character(&id, 42, 0, attrs_with_cha(12), 0, None)
+        .await;
+    game.inventories.write().await.insert(
+        id,
+        PlayerInventory {
+            bag: vec![bag_item(11, "apple", 3)],
+            ..Default::default()
+        },
+    );
+    game.reserve_instance_ids(100).await;
+    let buffer = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let writer = LogWriter(buffer.clone());
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(move || writer.clone())
+        .finish();
+    async {
+        game.drop_item(&id, 11).await;
+        let first = *game.ground_items.read().await.keys().next().unwrap();
+        game.pickup_item(&id, first).await;
+        game.drop_items(
+            &id,
+            vec![onlinerpg_shared::messages::BagLineItem {
+                instance_id: 11,
+                qty: 2,
+            }],
+        )
+        .await;
+        let second = *game.ground_items.read().await.keys().next().unwrap();
+        game.pickup_item(&id, second).await;
+    }
+    .with_subscriber(subscriber)
+    .await;
+    let bytes = buffer.lock().unwrap().clone();
+    let logs = std::str::from_utf8(&bytes).unwrap();
+    let events: Vec<_> = logs
+        .lines()
+        .filter(|line| line.contains("item_audit"))
+        .collect();
+    assert_eq!(events.len(), 4, "{logs}");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|line| line.contains("action=\"drop\""))
+            .count(),
+        2
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|line| line.contains("action=\"pickup\""))
+            .count(),
+        2
+    );
+    assert!(events
+        .iter()
+        .all(|line| line.contains("character_id=Some(42)")
+            && line.contains("bag_instance_id=Some(11)")));
+    assert!(events
+        .iter()
+        .all(|line| line.contains("item_def_id=\"apple\"")
+            && line.contains("enchant=0")
+            && line.contains("floor=0")));
+    assert!(events[2].contains("quantity=2"));
+    assert!(events[3].contains("quantity=2"));
+    assert_eq!(
+        game.get_player_inventory(&id).await.unwrap().bag[0].quantity,
+        3
+    );
+}
+
+#[tokio::test]
+async fn item_lock_blocks_equipped_and_batch_drops_until_unlocked() {
+    let game = make_test_game_state("locked_drops");
+    let id = pid("keeper");
+    game.add_player(make_player("keeper", 0.0, 0.0)).await;
+    game.inventories.write().await.insert(
+        id,
+        PlayerInventory {
+            bag: vec![
+                ItemInstance {
+                    enchant: 5,
+                    ..bag_item(1, "steel_longsword", 1)
+                },
+                bag_item(2, "apple", 3),
+            ],
+            ..Default::default()
+        },
+    );
+    game.set_item_locked(&id, 1, true).await;
+    game.equip_item(&id, 1).await;
+    game.drop_item(&id, 1).await;
+    assert!(game.get_player_inventory(&id).await.unwrap().equipped[&EquipSlot::MainHand].locked);
+    game.unequip_item(&id, EquipSlot::MainHand).await;
+    game.drop_items(
+        &id,
+        vec![
+            onlinerpg_shared::messages::BagLineItem {
+                instance_id: 2,
+                qty: 2,
+            },
+            onlinerpg_shared::messages::BagLineItem {
+                instance_id: 1,
+                qty: 1,
+            },
+        ],
+    )
+    .await;
+    let inv = game.get_player_inventory(&id).await.unwrap();
+    assert_eq!(inv.bag.len(), 2);
+    assert_eq!(
+        inv.bag
+            .iter()
+            .find(|i| i.instance_id == 2)
+            .unwrap()
+            .quantity,
+        3
+    );
+    assert!(game.ground_items.read().await.is_empty());
+    game.set_item_locked(&id, 1, false).await;
+    game.drop_item(&id, 1).await;
+    let ground = game.ground_items.read().await;
+    assert_eq!(ground.len(), 1);
+    assert_eq!(ground.values().next().unwrap().item.enchant, 5);
+}
+
+#[tokio::test]
+async fn item_locks_survive_save_and_reload_in_bag_and_equipment() {
+    let game = make_test_game_state("item_lock_persistence");
+    let auth = make_test_auth("item_lock_persistence");
+    let account = auth.login_npc("npc_item_lock").unwrap();
+    let record = create_test_character(&auth, &account, "Lockkeeper");
+    let id = pid("Lockkeeper");
+    game.add_player(make_player("Lockkeeper", 0.0, 0.0)).await;
+    game.register_player_character(&id, record.id, 0, attrs_with_cha(12), 0, None)
+        .await;
+    game.inventories.write().await.insert(
+        id,
+        PlayerInventory {
+            bag: vec![
+                bag_item(1, "steel_longsword", 1),
+                bag_item(2, "apple", 3),
+                bag_item(3, "apple", 2),
+            ],
+            ..Default::default()
+        },
+    );
+    game.set_item_locked(&id, 1, true).await;
+    game.set_item_locked(&id, 2, true).await;
+    game.equip_item(&id, 1).await;
+    game.flush_dirty_saves(&auth).await;
+    game.take_player_inventory(&id).await.unwrap();
+    game.load_player_inventory(&id, record.id, &auth).await;
+    let inv = game.get_player_inventory(&id).await.unwrap();
+    assert!(inv.equipped[&EquipSlot::MainHand].locked);
+    assert_eq!(inv.bag.len(), 2);
+    assert_eq!(inv.bag.iter().find(|i| i.locked).unwrap().quantity, 3);
+    assert_eq!(inv.bag.iter().find(|i| !i.locked).unwrap().quantity, 2);
+    assert!(auth
+        .load_inventory(record.id)
+        .unwrap()
+        .iter()
+        .any(|row| row.locked));
 }
 
 /// A non-stackable line never collapses into one multi-unit slot, and the

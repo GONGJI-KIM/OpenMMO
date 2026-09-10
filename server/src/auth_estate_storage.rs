@@ -57,12 +57,13 @@ fn chest_access(
 
 fn read_items(conn: &Connection, chest_id: i64) -> Result<Vec<ItemInstance>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT id,item_def_id,quantity,enchant,cape_color,cape_texture
+        "SELECT id,item_def_id,quantity,enchant,cape_color,cape_texture,locked
          FROM estate_chest_items WHERE chest_id=?1 ORDER BY id",
     )?;
     let items = stmt
         .query_map([chest_id], |row| {
             Ok(ItemInstance {
+                locked: row.get(6)?,
                 instance_id: row.get::<_, i64>(0)? as u64,
                 item_def_id: row.get(1)?,
                 quantity: row.get::<_, i64>(2)? as u32,
@@ -159,6 +160,12 @@ impl AuthService {
             }
             conn.pragma_update(None, "foreign_keys", foreign_keys)?;
             migration?;
+        }
+        if !Self::table_columns(conn, "estate_chest_items")?.contains("locked") {
+            conn.execute(
+                "ALTER TABLE estate_chest_items ADD COLUMN locked INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
         }
         Ok(())
     }
@@ -375,13 +382,14 @@ impl AuthService {
             let matching: Option<i64> = if deposit.stackable {
                 tx.query_row(
                     "SELECT id FROM estate_chest_items WHERE chest_id=?1 AND item_def_id=?2
-                     AND enchant=?3 AND cape_color IS ?4 AND cape_texture IS ?5 LIMIT 1",
+                     AND enchant=?3 AND cape_color IS ?4 AND cape_texture IS ?5 AND locked=?6 LIMIT 1",
                     params![
                         chest_id,
                         item.item_def_id,
                         item.enchant,
                         item.cape_color,
-                        item.cape_texture
+                        item.cape_texture,
+                        item.locked
                     ],
                     |row| row.get(0),
                 )
@@ -401,15 +409,16 @@ impl AuthService {
             } else {
                 tx.execute(
                     "INSERT INTO estate_chest_items
-                     (chest_id,item_def_id,quantity,enchant,cape_color,cape_texture)
-                     VALUES (?1,?2,?3,?4,?5,?6)",
+                     (chest_id,item_def_id,quantity,enchant,cape_color,cape_texture,locked)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7)",
                     params![
                         chest_id,
                         item.item_def_id,
                         deposit.quantity,
                         item.enchant,
                         item.cape_color,
-                        item.cape_texture
+                        item.cape_texture,
+                        item.locked
                     ],
                 )?;
             }

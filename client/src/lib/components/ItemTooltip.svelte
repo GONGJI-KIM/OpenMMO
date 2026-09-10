@@ -13,6 +13,7 @@
     def: ItemDefinition
     /** Enchantment level; prefixes the name (e.g. "+2 Iron Sword"). */
     enchant?: number
+    locked?: boolean
     side?: 'left' | 'right'
     anchor: DOMRect
     /** The equipped item this one would replace. */
@@ -21,7 +22,14 @@
 
   // Mounted at document.body by the itemTooltip action; sits beside the
   // anchor, clamped vertically and flipped sideways when it would overflow.
-  let { def, enchant = 0, side = 'right', anchor, compare }: Props = $props()
+  let {
+    def,
+    enchant = 0,
+    locked = false,
+    side = 'right',
+    anchor,
+    compare,
+  }: Props = $props()
 
   // A bow's own die is a token: what it hurts for depends on the round it
   // draws, so the comparison is made against that rather than the bow alone.
@@ -71,6 +79,9 @@
   bind:clientHeight={height}
 >
   <div class="tooltip-name">{displayName(def, enchant)}</div>
+  {#if locked}
+    <div class="tooltip-lock">Locked</div>
+  {/if}
   <div class="tooltip-desc">{def.description}</div>
   <div class="tooltip-stats">
     <span>Weight: {def.weight}</span>
@@ -119,6 +130,11 @@
 </div>
 
 <style>
+  .tooltip-lock {
+    font-size: 11px;
+    color: #f0c040;
+    margin-bottom: 6px;
+  }
   .tooltip {
     position: fixed;
     width: 160px;

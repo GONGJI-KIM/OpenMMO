@@ -1198,6 +1198,7 @@ async fn setup_archer_with_ammo(
     inv.equipped.insert(
         EquipSlot::MainHand,
         ItemInstance {
+            locked: false,
             instance_id: 1,
             item_def_id: weapon.to_string(),
             quantity: 1,

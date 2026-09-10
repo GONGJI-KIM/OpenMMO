@@ -457,7 +457,7 @@ impl super::GameState {
         };
         let mut stock: Vec<StockEntry> = Vec::new();
         for item in &inv.bag {
-            if def.refuses_to_sell(&item.item_def_id) {
+            if item.locked || def.refuses_to_sell(&item.item_def_id) {
                 continue;
             }
             if def.keeps(&item.item_def_id) && !offered(&item.item_def_id) {
@@ -541,6 +541,7 @@ impl super::GameState {
                         inv.equipped.insert(
                             slot,
                             ItemInstance {
+                                locked: false,
                                 instance_id: next_id,
                                 item_def_id: item_def_id.clone(),
                                 quantity: 1,
@@ -556,7 +557,8 @@ impl super::GameState {
                         next_id += stack_into_bag(
                             &mut inv.bag,
                             BagInsert::one(stackable, item_def_id, 0, next_id),
-                        );
+                        )
+                        .ids_used;
                     }
                 }
             }
@@ -720,7 +722,7 @@ impl super::GameState {
                         )
                         .await;
                 };
-                let Some(draw) = draw_from_bag(&mut npc_inv.bag, item_def_id, 1)
+                let Some(draw) = draw_from_bag(&mut npc_inv.bag, item_def_id, 1, false)
                     .into_iter()
                     .next()
                 else {
@@ -922,7 +924,7 @@ impl super::GameState {
                 let available: u32 = npc_inv
                     .bag
                     .iter()
-                    .filter(|i| i.item_def_id == item_def_id)
+                    .filter(|i| i.item_def_id == item_def_id && !i.locked)
                     .map(|i| i.quantity)
                     .sum();
                 if available < qty {
@@ -994,7 +996,7 @@ impl super::GameState {
             let npc_inv = inventories.get_mut(npc_player_id).expect("checked above");
             let mut purchases = Vec::new();
             for plan in &plans {
-                for draw in draw_from_bag(&mut npc_inv.bag, &plan.item_def_id, plan.qty) {
+                for draw in draw_from_bag(&mut npc_inv.bag, &plan.item_def_id, plan.qty, false) {
                     purchases.push(Purchase {
                         item_def_id: &plan.item_def_id,
                         qty: draw.quantity,
@@ -1025,6 +1027,7 @@ impl super::GameState {
                 next_id += stack_into_bag(
                     &mut inv.bag,
                     BagInsert {
+                        locked: false,
                         stackable,
                         item_def_id: purchase.item_def_id,
                         enchant: purchase.enchant,
@@ -1033,7 +1036,8 @@ impl super::GameState {
                         first_instance_id: next_id,
                         quantity: purchase.qty,
                     },
-                );
+                )
+                .ids_used;
             }
         }
 
@@ -1248,7 +1252,7 @@ impl super::GameState {
                 inventories.get_mut(player_id).and_then(|inv| {
                     inv.bag
                         .iter()
-                        .position(|i| i.instance_id == instance_id)
+                        .position(|i| i.instance_id == instance_id && !i.locked)
                         .map(|idx| {
                             (
                                 idx,
@@ -1268,7 +1272,7 @@ impl super::GameState {
                         &item_def_id,
                         DealKind::Sell,
                         deal,
-                        Some("Item not found in bag"),
+                        Some("Item is locked or no longer in your bag"),
                     )
                     .await;
             };
@@ -1510,6 +1514,13 @@ impl super::GameState {
                     .send_trade_error(player_id, "Item not found in bag")
                     .await;
             };
+            if item.locked {
+                drop(inventories);
+                drop(gold_map);
+                return self
+                    .send_trade_error(player_id, super::inventory::LOCKED_ITEM_MESSAGE)
+                    .await;
+            }
             if quantities[&req.instance_id] > item.quantity {
                 drop(inventories);
                 drop(gold_map);
@@ -1639,6 +1650,7 @@ impl super::GameState {
                 next_unit_id += stack_into_bag(
                     &mut npc_inv.bag,
                     BagInsert {
+                        locked: false,
                         stackable,
                         item_def_id: &plan.item_def_id,
                         enchant: plan.enchant,
@@ -1647,7 +1659,8 @@ impl super::GameState {
                         first_instance_id: next_unit_id,
                         quantity: plan.qty,
                     },
-                );
+                )
+                .ids_used;
             }
         }
 

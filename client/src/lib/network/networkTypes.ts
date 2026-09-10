@@ -248,6 +248,7 @@ export type ClientMessage =
   | { EquipItem: { instance_id: number } }
   | { SelectAmmo: { item_def_id: string | null } }
   | { UnequipItem: { slot: EquipSlot } }
+  | { SetItemLocked: { instance_id: number; locked: boolean } }
   | { DropItem: { instance_id: number } }
   | { DropItems: { items: BagLineItem[] } }
   | 'PickupStarted'
@@ -352,6 +353,7 @@ export type EquipSlot =
   | 'shirt'
 
 export type ItemInstance = {
+  locked?: boolean
   instance_id: number
   item_def_id: string
   quantity: number

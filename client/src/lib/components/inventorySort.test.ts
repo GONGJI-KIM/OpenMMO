@@ -14,6 +14,31 @@ function makeItem(
 }
 
 describe('sortBag', () => {
+  it('keeps locked stacks individually selectable and separate from unlocked stacks', () => {
+    const bag = [
+      makeItem({
+        instance_id: 1,
+        item_def_id: 'apple',
+        quantity: 3,
+        locked: true,
+      }),
+      makeItem({
+        instance_id: 2,
+        item_def_id: 'apple',
+        quantity: 2,
+        locked: true,
+      }),
+      makeItem({ instance_id: 3, item_def_id: 'apple', quantity: 5 }),
+      makeItem({ instance_id: 4, item_def_id: 'apple', quantity: 7 }),
+    ]
+    const sorted = sortBag(bag)
+    expect(sorted).toHaveLength(3)
+    expect(
+      sorted.filter((item) => item.locked).map((item) => item.quantity)
+    ).toEqual([3, 2])
+    expect(sorted.find((item) => !item.locked)?.quantity).toBe(12)
+    expect(bag.map((item) => item.quantity)).toEqual([3, 2, 5, 7])
+  })
   it('merges stackable stacks of the same item and enchant', () => {
     const bag = [
       makeItem({ instance_id: 1, item_def_id: 'healing_potion', quantity: 30 }),

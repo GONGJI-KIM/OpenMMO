@@ -415,6 +415,7 @@ impl GameState {
                         .unwrap_or("That item");
                     Err(format!("{name} cannot be sold on."))
                 }
+                Some(item) if item.locked => Err(super::inventory::LOCKED_ITEM_MESSAGE.to_string()),
                 Some(item) if item.quantity < quantity => {
                     Err("You don't have that many.".to_string())
                 }
@@ -649,6 +650,7 @@ impl GameState {
                         .iter()
                         .find(|item| {
                             item.instance_id == listing.instance_id
+                                && !item.locked
                                 && item.item_def_id == listing.item_def_id
                                 && item.enchant == listing.enchant
                                 && item.quantity >= *qty
@@ -683,6 +685,7 @@ impl GameState {
                     next_id += stack_into_bag(
                         &mut inv.bag,
                         BagInsert {
+                            locked: false,
                             stackable: self.item_defs.stackable(&listing.item_def_id),
                             item_def_id: &listing.item_def_id,
                             enchant: listing.enchant,
@@ -691,7 +694,8 @@ impl GameState {
                             first_instance_id: next_id,
                             quantity: *qty,
                         },
-                    );
+                    )
+                    .ids_used;
                 }
             }
             gold.insert(*buyer, buyer_gold_after);

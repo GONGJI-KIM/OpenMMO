@@ -407,6 +407,7 @@ fn a_joining_bard_takes_up_the_worn_mandolin() {
     use onlinerpg_shared::inventory::{EquipSlot, ItemInstance, PlayerInventory};
 
     let item = |instance_id: u64, def: &str| ItemInstance {
+        locked: false,
         instance_id,
         item_def_id: def.to_string(),
         quantity: 1,

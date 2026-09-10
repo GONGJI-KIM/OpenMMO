@@ -109,6 +109,7 @@ fn valid_character_name(name: &str) -> bool {
 /// equipped item.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemRow {
+    pub locked: bool,
     pub item_def_id: String,
     pub quantity: u32,
     pub equip_slot: Option<String>,
@@ -570,8 +571,8 @@ impl AuthService {
         let mut insert = conn.prepare(
             "INSERT INTO character_items \
              (character_id, item_def_id, quantity, equip_slot, enchant, cape_color, \
-              cape_texture) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+              cape_texture, locked) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?;
 
         for (character_id, items) in inventories {
@@ -584,7 +585,8 @@ impl AuthService {
                     item.equip_slot,
                     item.enchant,
                     item.cape_color,
-                    item.cape_texture
+                    item.cape_texture,
+                    item.locked
                 ])?;
             }
         }
@@ -849,6 +851,12 @@ impl AuthService {
     /// `ensure_character_attribute_columns` for the characters table.
     fn ensure_character_item_columns(conn: &Connection) -> Result<(), rusqlite::Error> {
         let columns = Self::table_columns(conn, "character_items")?;
+        if !columns.contains("locked") {
+            conn.execute(
+                "ALTER TABLE character_items ADD COLUMN locked INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
         if !columns.contains("enchant") {
             conn.execute(
                 "ALTER TABLE character_items ADD COLUMN enchant INTEGER NOT NULL DEFAULT 0",
@@ -2072,12 +2080,13 @@ impl AuthService {
     pub fn load_inventory(&self, character_id: i64) -> Result<Vec<ItemRow>, AuthError> {
         let conn = self.open_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT item_def_id, quantity, equip_slot, enchant, cape_color, cape_texture \
+            "SELECT item_def_id, quantity, equip_slot, enchant, cape_color, cape_texture, locked \
              FROM character_items WHERE character_id = ?1",
         )?;
         let rows = stmt
             .query_map(params![character_id], |row| {
                 Ok(ItemRow {
+                    locked: row.get(6)?,
                     item_def_id: row.get(0)?,
                     quantity: row.get(1)?,
                     equip_slot: row.get(2)?,

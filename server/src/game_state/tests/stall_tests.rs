@@ -167,6 +167,51 @@ async fn the_item_lays_the_table_out_and_using_it_again_packs_it_up() {
 }
 
 #[tokio::test]
+async fn item_lock_blocks_stall_listing_and_stale_stall_sales() {
+    let market = make_market("item_lock_stall", 0, 10000).await;
+    let game = &market.game_state;
+    give(game, &market.owner, bag_item(1, "peddler_stall", 1)).await;
+    give(game, &market.owner, bag_item(2, "steel_longsword", 1)).await;
+    game.use_item(&market.owner, 1).await;
+    game.set_item_locked(&market.owner, 2, true).await;
+    game.list_stall_item(&market.owner, 2, 1, 100).await;
+    assert!(game.stalls.read().await[&market.owner].listings.is_empty());
+    game.set_item_locked(&market.owner, 2, false).await;
+    game.list_stall_item(&market.owner, 2, 1, 100).await;
+    game.set_item_locked(&market.owner, 2, true).await;
+    assert!(!game.get_player_inventory(&market.owner).await.unwrap().bag[1].locked);
+    game.inventories
+        .write()
+        .await
+        .get_mut(&market.owner)
+        .unwrap()
+        .bag[1]
+        .locked = true;
+    game.buy_from_stall(
+        &market.customer,
+        stall_id(game, &market.owner).await,
+        buy(2, 1),
+        &market.auth,
+    )
+    .await;
+    assert_eq!(
+        game.get_player_inventory(&market.owner)
+            .await
+            .unwrap()
+            .bag
+            .len(),
+        2
+    );
+    assert!(game
+        .get_player_inventory(&market.customer)
+        .await
+        .unwrap()
+        .bag
+        .is_empty());
+    assert_eq!(game.player_gold.read().await[&market.customer], 10000);
+}
+
+#[tokio::test]
 async fn straying_past_the_leash_packs_the_stall_up() {
     let market = make_market("stall_leash", 0, 0).await;
     let game_state = &market.game_state;

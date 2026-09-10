@@ -26,6 +26,7 @@ export type OverlayId =
   | 'capeTexture'
   | 'chatChannelMenu'
   | 'socialMenu'
+  | 'itemUnlock'
 
 /** `layer` is paint order, not raw z-index: `.game-hud`'s z-index:1 stacking
  *  context traps the panel band (see panelLayout) below the root-level dialogs
@@ -55,6 +56,7 @@ const OVERLAYS: Record<OverlayId, { layer: number; close?: () => void }> = {
   // Transient popups: whenever one is open, Escape must hit it first.
   chatChannelMenu: { layer: 6 },
   socialMenu: { layer: 6 },
+  itemUnlock: { layer: 7 },
 }
 
 const stack = writable<OverlayId[]>([])

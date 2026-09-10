@@ -214,6 +214,9 @@ fn resolve_offer(
             .iter()
             .find(|item| item.instance_id == slot.instance_id)
             .ok_or_else(|| "You no longer have that item.".to_string())?;
+        if item.locked {
+            return Err(super::inventory::LOCKED_ITEM_MESSAGE.to_string());
+        }
         if item_defs.untradeable(&item.item_def_id) {
             let name = item_defs
                 .get(&item.item_def_id)
@@ -1057,6 +1060,7 @@ impl super::GameState {
                         next_id += stack_into_bag(
                             &mut inv.bag,
                             BagInsert {
+                                locked: false,
                                 stackable: self.item_defs.stackable(&item.item_def_id),
                                 item_def_id: &item.item_def_id,
                                 enchant: item.enchant,
@@ -1065,7 +1069,8 @@ impl super::GameState {
                                 first_instance_id: next_id,
                                 quantity: item.quantity,
                             },
-                        );
+                        )
+                        .ids_used;
                     }
                 }
             };

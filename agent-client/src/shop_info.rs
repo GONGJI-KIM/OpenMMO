@@ -322,6 +322,7 @@ mod tests {
         ids.iter()
             .enumerate()
             .map(|(i, id)| onlinerpg_shared::inventory::ItemInstance {
+                locked: false,
                 instance_id: i as u64 + 1,
                 item_def_id: (*id).to_string(),
                 quantity: 1,

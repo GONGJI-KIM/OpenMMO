@@ -656,6 +656,11 @@ class NetworkManager {
     this.sendMessage({ UnequipItem: { slot } })
   }
 
+  sendSetItemLocked(instanceId: number, locked: boolean) {
+    if (!this.isNetworkableInstanceId(instanceId, 'lock')) return
+    this.sendMessage({ SetItemLocked: { instance_id: instanceId, locked } })
+  }
+
   sendDebugDropItem(itemDefId: string) {
     this.sendMessage({ DebugDropItem: { item_def_id: itemDefId } })
   }

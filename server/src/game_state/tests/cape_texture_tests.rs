@@ -200,6 +200,7 @@ async fn prints_keep_otherwise_identical_capes_apart() {
         super::super::inventory::stack_into_bag(
             &mut bag,
             super::super::inventory::BagInsert {
+                locked: false,
                 stackable: true,
                 item_def_id: "wool_cape",
                 enchant: 0,

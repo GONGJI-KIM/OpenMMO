@@ -121,6 +121,7 @@ fn attrs_with_cha(cha: u8) -> CharacterAttributes {
 
 fn bag_item(instance_id: u64, item_def_id: &str, quantity: u32) -> ItemInstance {
     ItemInstance {
+        locked: false,
         instance_id,
         item_def_id: item_def_id.to_string(),
         quantity,

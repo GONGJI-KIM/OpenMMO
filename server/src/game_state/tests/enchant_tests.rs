@@ -27,6 +27,7 @@ async fn setup_enchant_reader(
         inv.equipped.insert(
             *slot,
             ItemInstance {
+                locked: false,
                 instance_id: index as u64 + 1,
                 item_def_id: item_def_id.to_string(),
                 quantity: 1,
@@ -83,6 +84,47 @@ async fn enchant_scroll_enchants_wielded_weapon() {
     let weapon = inv.equipped.get(&EquipSlot::MainHand).unwrap();
     assert_eq!(weapon.enchant, 1);
     assert!(inv.bag.is_empty(), "the scroll and the oil should be spent");
+}
+
+#[tokio::test]
+async fn enchant_scroll_preserves_locked_weapons_and_materials() {
+    for enchant in [0, 5, 12] {
+        let game = make_test_game_state(&format!("locked_enchant_weapon_{enchant}"));
+        let mut rx = setup_weapon_enchant_reader(&game, Some(("iron_sword", enchant)), 1).await;
+        game.set_item_locked(&pid("reader"), 1, true).await;
+        let before = game.get_player_inventory(&pid("reader")).await.unwrap();
+        while rx.try_recv().is_ok() {}
+
+        game.use_item(&pid("reader"), SCROLL_ID).await;
+
+        let after = game.get_player_inventory(&pid("reader")).await.unwrap();
+        assert_eq!(after.equipped, before.equipped);
+        assert_eq!(after.bag, before.bag);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ServerMessage::SystemMessage { message }) if message.contains("unlocked")
+        ));
+        if enchant == 0 {
+            game.set_item_locked(&pid("reader"), 1, false).await;
+            game.use_item(&pid("reader"), SCROLL_ID).await;
+            let after = game.get_player_inventory(&pid("reader")).await.unwrap();
+            assert_eq!(after.equipped[&EquipSlot::MainHand].enchant, 1);
+            assert!(after.bag.is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn unlocked_equipment_can_be_enchanted_with_locked_consumables() {
+    let game = make_test_game_state("locked_enchant_consumables");
+    let _rx = setup_weapon_enchant_reader(&game, Some(("iron_sword", 0)), 1).await;
+    game.set_item_locked(&pid("reader"), SCROLL_ID, true).await;
+    game.set_item_locked(&pid("reader"), OIL_ID, true).await;
+    game.use_item(&pid("reader"), SCROLL_ID).await;
+    let inv = game.get_player_inventory(&pid("reader")).await.unwrap();
+    assert!(!inv.equipped[&EquipSlot::MainHand].locked);
+    assert_eq!(inv.equipped[&EquipSlot::MainHand].enchant, 1);
+    assert!(inv.bag.is_empty());
 }
 
 #[tokio::test]
@@ -171,6 +213,66 @@ async fn enchant_armor_scroll_ignores_weapons_and_accessories() {
     assert_eq!(inv.equipped.get(&EquipSlot::Chest).unwrap().enchant, 1);
     assert_eq!(inv.equipped.get(&EquipSlot::MainHand).unwrap().enchant, 0);
     assert_eq!(inv.equipped.get(&EquipSlot::Ring).unwrap().enchant, 0);
+}
+
+#[tokio::test]
+async fn enchant_armor_scroll_skips_locked_armor() {
+    let game = make_test_game_state("enchant_armor_locked_candidate");
+    let _rx = setup_armor_enchant_reader(
+        &game,
+        &[
+            (EquipSlot::Chest, "leather_armor", 12),
+            (EquipSlot::OffHand, "wooden_shield", 0),
+        ],
+        3,
+    )
+    .await;
+    game.set_item_locked(&pid("reader"), 1, true).await;
+    let before = game.get_player_inventory(&pid("reader")).await.unwrap();
+
+    for enchant in 1..=3 {
+        game.use_item(&pid("reader"), SCROLL_ID).await;
+        let after = game.get_player_inventory(&pid("reader")).await.unwrap();
+        assert_eq!(
+            after.equipped[&EquipSlot::Chest],
+            before.equipped[&EquipSlot::Chest]
+        );
+        assert_eq!(after.equipped[&EquipSlot::OffHand].enchant, enchant);
+    }
+    assert!(game
+        .get_player_inventory(&pid("reader"))
+        .await
+        .unwrap()
+        .bag
+        .is_empty());
+}
+
+#[tokio::test]
+async fn enchant_armor_scroll_keeps_materials_when_all_armor_is_locked() {
+    let game = make_test_game_state("enchant_armor_all_locked");
+    let mut rx = setup_armor_enchant_reader(
+        &game,
+        &[
+            (EquipSlot::Chest, "leather_armor", 12),
+            (EquipSlot::OffHand, "wooden_shield", 12),
+        ],
+        1,
+    )
+    .await;
+    game.set_item_locked(&pid("reader"), 1, true).await;
+    game.set_item_locked(&pid("reader"), 2, true).await;
+    let before = game.get_player_inventory(&pid("reader")).await.unwrap();
+    while rx.try_recv().is_ok() {}
+
+    game.use_item(&pid("reader"), SCROLL_ID).await;
+
+    let after = game.get_player_inventory(&pid("reader")).await.unwrap();
+    assert_eq!(after.equipped, before.equipped);
+    assert_eq!(after.bag, before.bag);
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(ServerMessage::SystemMessage { message }) if message.contains("unlocked")
+    ));
 }
 
 #[tokio::test]

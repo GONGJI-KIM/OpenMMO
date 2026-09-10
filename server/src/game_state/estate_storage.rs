@@ -745,6 +745,7 @@ impl GameState {
             if *stackable
                 && updated.bag.iter().any(|entry| {
                     entry.item_def_id == item.item_def_id
+                        && entry.locked == item.locked
                         && entry.enchant == item.enchant
                         && entry.cape_color == item.cape_color
                         && entry.cape_texture == item.cape_texture
@@ -753,9 +754,10 @@ impl GameState {
             {
                 return Err("A bag stack is full.");
             }
-            let used = stack_into_bag(
+            let inserted = stack_into_bag(
                 &mut updated.bag,
                 BagInsert {
+                    locked: item.locked,
                     stackable: *stackable,
                     item_def_id: &item.item_def_id,
                     enchant: item.enchant,
@@ -765,7 +767,7 @@ impl GameState {
                     quantity: *quantity,
                 },
             );
-            next_id += used;
+            next_id += inserted.ids_used;
         }
         let gold = self.player_gold.read().await;
         character.gold = *gold.get(player_id).ok_or("Gold balance not found.")?;

@@ -203,6 +203,7 @@ async fn packing_up_before_leaving_folds_our_stall_and_tip_hat() {
     s.self_player_id = Some(me.id);
     s.self_player = Some(me);
     s.self_bag = vec![onlinerpg_shared::inventory::ItemInstance {
+        locked: false,
         instance_id: 41,
         item_def_id: "tip_hat".to_string(),
         quantity: 1,

@@ -1,8 +1,10 @@
 <script lang="ts">
+  import ItemLockButton from './ItemLockButton.svelte'
   import {
     inventoryStore,
+    itemLockMode,
     playerEffectiveStats,
-    wornAmmoDefId,
+    wornAmmoStack,
   } from '../stores/inventoryStore'
   import type { EquipSlot } from '../stores/inventoryStore'
   import { getItemDef, isRangedWeapon } from '../data/itemDefs'
@@ -175,14 +177,7 @@
     heldInLeft ? getItemDef(mainHandId ?? '')?.ammoKind : undefined
   )
 
-  const ammoCell = $derived(
-    (() => {
-      const worn = wornAmmoDefId($inventoryStore)
-      return worn
-        ? ($inventoryStore.bag.find((i) => i.item_def_id === worn) ?? null)
-        : null
-    })()
-  )
+  const ammoCell = $derived(wornAmmoStack($inventoryStore) ?? null)
 
   /** The stored slot a panel cell stands in for. */
   function slotBehind(cell: EquipSlot): EquipSlot {
@@ -199,7 +194,12 @@
   function onEquipPointerDown(
     e: PointerEvent,
     slot: EquipSlot,
-    item: { instance_id: number; item_def_id: string; enchant: number }
+    item: {
+      instance_id: number
+      item_def_id: string
+      enchant: number
+      locked?: boolean
+    }
   ) {
     if (e.button !== 0) return
     e.preventDefault()
@@ -221,7 +221,7 @@
           networkManager.sendUnequipItem(slot)
           return
         }
-        if (!isOverAnyDialog(x, y)) {
+        if (!item.locked && !isOverAnyDialog(x, y)) {
           networkManager.sendDropItem(item.instance_id)
         }
       }
@@ -374,6 +374,9 @@
                   <span class="item-count">{ammo.quantity}</span>
                 {:else if item && item.enchant > 0}
                   <span class="item-enchant">+{item.enchant}</span>
+                {/if}
+                {#if item && ($itemLockMode || item.locked)}
+                  <ItemLockButton {item} />
                 {/if}
               </div>
             {/each}

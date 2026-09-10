@@ -39,7 +39,7 @@ function categoryOf(itemDefId: string): Category {
 }
 
 export function inventoryGroupKey(item: ItemInstance): string {
-  return getItemDef(item.item_def_id)?.stackable === true
+  return !item.locked && getItemDef(item.item_def_id)?.stackable === true
     ? `${item.item_def_id}:${item.enchant}`
     : `unique:${item.instance_id}`
 }

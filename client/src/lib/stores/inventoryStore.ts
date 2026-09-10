@@ -23,6 +23,7 @@ const initialState: PlayerInventory = {
 }
 
 export const inventoryStore = writable<PlayerInventory>({ ...initialState })
+export const itemLockMode = writable(false)
 
 /** Mirrors the server's equip-target rule (`EquipSlot::alternate`). */
 const ALTERNATE_SLOT: Partial<Record<EquipSlot, EquipSlot>> = {
@@ -77,19 +78,13 @@ export const playerEffectiveStats = writable<Pick<
 /** Item defs that act as a carried light source (mirrors shared TORCH_ITEM_IDS). */
 const TORCH_ITEM_IDS = ['torch', 'worn_torch']
 
-/** The round the paperdoll is showing, or undefined when none is. Worn
- *  ammunition is a stack in the bag rather than a slotted item — a stackable
- *  cannot hold a slot — so the bag has to hide the very stack the hand cell
- *  is drawing, and only while it is drawing it. Both panels read this so
- *  they cannot disagree and leave a quiver in neither place. */
-export function wornAmmoDefId(
+/** The bag stack displayed as the character's quiver. */
+export function wornAmmoStack(
   inv: Pick<PlayerInventory, 'bag' | 'equipped' | 'active_ammo'>
-): string | undefined {
+): ItemInstance | undefined {
   if (!inv.active_ammo) return undefined
   if (!isRangedWeapon(inv.equipped.main_hand?.item_def_id)) return undefined
-  return inv.bag.some((item) => item.item_def_id === inv.active_ammo)
-    ? inv.active_ammo
-    : undefined
+  return inv.bag.find((item) => item.item_def_id === inv.active_ammo)
 }
 
 export function isTorchItemDefId(id: string | null | undefined): boolean {
@@ -151,6 +146,7 @@ export function setInventory(inventory: PlayerInventory) {
 
 export function resetInventoryStore() {
   inventoryStore.set({ bag: [], equipped: {} })
+  itemLockMode.set(false)
   playerGold.set(0)
   playerEffectiveStats.set(null)
 }

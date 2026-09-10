@@ -251,8 +251,29 @@ async fn dungeon_chest_stays_shut_without_the_key() {
     );
 }
 
-/// A real open spends the key; the same-night empty re-open does not — so a
-/// second key found later waits in the bag for tomorrow's chest.
+#[tokio::test]
+async fn dungeon_chest_consumes_a_locked_key() {
+    let auth = make_test_auth("chest_locked_key");
+    let account = auth.login_npc("npc_chest_locked_key").unwrap();
+    let character = create_test_character(&auth, &account, "Lockkeeper");
+    let game = make_test_game_state("chest_locked_key");
+    let player_id = stage_chest_opener(&game, "Lockkeeper", character.id).await;
+    let inv = game.get_player_inventory(&player_id).await.unwrap();
+    let key = inv
+        .bag
+        .iter()
+        .find(|item| item.item_def_id == CRYPT_CHEST_KEY)
+        .unwrap();
+    game.set_item_locked(&player_id, key.instance_id, true)
+        .await;
+
+    game.open_dungeon_chest(&player_id, CRYPT_ID, &auth).await;
+
+    assert!(game.get_player_gold(&player_id).await > 0);
+    assert_eq!(bag_count(&game, &player_id, CRYPT_CHEST_KEY).await, 0);
+}
+
+/// A filled chest spends a key; an empty reopen keeps it.
 #[tokio::test]
 async fn dungeon_chest_spends_one_key_and_an_empty_reopen_keeps_it() {
     let auth = make_test_auth("chest_key_spent");

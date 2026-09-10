@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isTorchItemDefId, wornAmmoDefId } from './inventoryStore'
+import { isTorchItemDefId, wornAmmoStack } from './inventoryStore'
 
 describe('isTorchItemDefId', () => {
   it('recognizes every carried torch variant', () => {
@@ -14,7 +14,7 @@ describe('isTorchItemDefId', () => {
   })
 })
 
-describe('wornAmmoDefId', () => {
+describe('wornAmmoStack', () => {
   const bag = (...ids: string[]) =>
     ids.map((item_def_id, i) => ({
       instance_id: i + 1,
@@ -25,26 +25,26 @@ describe('wornAmmoDefId', () => {
 
   it('names the stack the hand cell is drawing', () => {
     expect(
-      wornAmmoDefId({
+      wornAmmoStack({
         bag: bag('iron_arrow'),
         equipped: { main_hand: bag('bow')[0] },
         active_ammo: 'iron_arrow',
       })
-    ).toBe('iron_arrow')
+    ).toEqual(bag('iron_arrow')[0])
   })
 
   /** The cell only appears with a ranged weapon in hand. Hiding the stack
    *  from the bag on any other rule would put the quiver in neither place. */
   it('names nothing without a ranged weapon in hand', () => {
     expect(
-      wornAmmoDefId({
+      wornAmmoStack({
         bag: bag('iron_arrow'),
         equipped: { main_hand: bag('iron_sword')[0] },
         active_ammo: 'iron_arrow',
       })
     ).toBeUndefined()
     expect(
-      wornAmmoDefId({
+      wornAmmoStack({
         bag: bag('iron_arrow'),
         equipped: {},
         active_ammo: 'iron_arrow',
@@ -56,7 +56,7 @@ describe('wornAmmoDefId', () => {
    *  longer carried — nothing to hide then. */
   it('names nothing once the chosen stack is spent', () => {
     expect(
-      wornAmmoDefId({
+      wornAmmoStack({
         bag: bag('steel_arrow'),
         equipped: { main_hand: bag('bow')[0] },
         active_ammo: 'iron_arrow',
@@ -66,7 +66,7 @@ describe('wornAmmoDefId', () => {
 
   it('names nothing when no round is chosen', () => {
     expect(
-      wornAmmoDefId({
+      wornAmmoStack({
         bag: bag('iron_arrow'),
         equipped: { main_hand: bag('bow')[0] },
         active_ammo: null,

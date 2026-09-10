@@ -8,6 +8,7 @@ async fn sell_to_merchant_records_buyback_and_restores_item() {
         let mut inventories = game_state.inventories.write().await;
         let mut inv: onlinerpg_shared::inventory::PlayerInventory = Default::default();
         inv.bag.push(ItemInstance {
+            locked: false,
             instance_id: 7,
             item_def_id: "iron_sword".to_string(),
             quantity: 1,

@@ -20,7 +20,9 @@
   const listings = $derived(stall?.listings ?? [])
   const listed = $derived(new Set(listings.map((l) => l.instance_id)))
   const bag = $derived(
-    sortBag($inventoryStore.bag).filter((item) => !listed.has(item.instance_id))
+    sortBag($inventoryStore.bag).filter(
+      (item) => !item.locked && !listed.has(item.instance_id)
+    )
   )
 
   let draft = $state<{ item: ItemInstance; quantity: number } | null>(null)
@@ -56,6 +58,13 @@
   })
 
   const draftPrice = $derived(parseGold(priceText))
+  $effect(() => {
+    if (
+      draft &&
+      !bag.some((item) => item.instance_id === draft?.item.instance_id)
+    )
+      draft = null
+  })
   const draftValid = $derived(
     draft !== null &&
       draft.quantity > 0 &&

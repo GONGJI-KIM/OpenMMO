@@ -42,6 +42,7 @@ export function itemTooltip(
       props: {
         def: params.def,
         enchant: params.item?.enchant ?? params.enchant,
+        locked: params.item?.locked,
         compare: displacedDef
           ? { def: displacedDef, enchant: displaced.enchant }
           : undefined,
@@ -72,6 +73,7 @@ export function itemTooltip(
 
   return {
     update(next: ItemTooltipParams | null) {
+      if (next?.item?.locked !== params?.item?.locked) hide()
       params = next
       if (!next) hide()
     },

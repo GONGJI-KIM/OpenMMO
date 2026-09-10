@@ -511,6 +511,10 @@ pub enum ClientMessage {
     UnequipItem {
         slot: inventory::EquipSlot,
     },
+    SetItemLocked {
+        instance_id: u64,
+        locked: bool,
+    },
     /// Draw from this pile instead of the strongest. `None` clears the choice
     /// and puts the next shot back on the best round in the bag. Ammunition
     /// is stackable and so cannot occupy an equip slot; this is how it is

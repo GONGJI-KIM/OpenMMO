@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { SvelteMap } from 'svelte/reactivity'
   import './tradePanel.css'
   import { get } from 'svelte/store'
   import { assetUrl } from '../utils/assetUrl'
@@ -136,13 +137,39 @@
   const sellEntries = $derived.by((): SelectableGroup[] => {
     if (!session || isRegistrar) return []
     const wishlist = session.wishlist
-    return groupBagForSelection($inventoryStore.bag).filter((group) => {
+    return groupBagForSelection(
+      $inventoryStore.bag.filter((item) => !item.locked)
+    ).filter((group) => {
       const basePrice = getItemDef(group.itemDefId)?.basePrice ?? 0
       return (
         basePrice > 0 &&
         (wishlist.length === 0 || wishlist.includes(group.itemDefId))
       )
     })
+  })
+
+  $effect(() => {
+    const remaining = new SvelteMap(
+      sellEntries.map((group) => [group.key, group.totalQty])
+    )
+    const next = cart.flatMap((entry) => {
+      if (entry.kind !== 'sell') return [entry]
+      const key = entry.groupKey ?? ''
+      const available = remaining.get(key) ?? 0
+      const qty = Math.min(entry.qty, available)
+      remaining.set(key, available - qty)
+      return qty > 0 ? [qty === entry.qty ? entry : { ...entry, qty }] : []
+    })
+    if (
+      next.length !== cart.length ||
+      next.some((entry, index) => entry !== cart[index])
+    )
+      cart = next
+    if (
+      pendingAdd?.kind === 'sell' &&
+      !remaining.has(pendingAdd.groupKey ?? '')
+    )
+      pendingAdd = null
   })
 
   function dealPct(itemDefId: string, kind: DealKind): number {

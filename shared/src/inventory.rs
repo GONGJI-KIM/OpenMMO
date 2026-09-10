@@ -94,6 +94,8 @@ pub struct ItemInstance {
     /// `/api/cape-texture/<hash>`.
     #[serde(default)]
     pub cape_texture: Option<String>,
+    #[serde(default)]
+    pub locked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -185,6 +185,46 @@ async fn a_completed_trade_moves_items_and_coin_once() {
         .is_none());
 }
 
+#[tokio::test]
+async fn item_lock_blocks_trade_offers_and_stale_trade_completion() {
+    let pair = make_trade_pair("item_lock_trade", 100, 0).await;
+    give(&pair.game_state, &pair.a, bag_item(1, "steel_longsword", 1)).await;
+    pair.game_state.set_item_locked(&pair.a, 1, true).await;
+    open_session(&pair).await;
+    pair.game_state
+        .set_player_trade_offer(&pair.a, vec![slot(1, 1)], 0)
+        .await;
+    assert!(pair
+        .game_state
+        .player_trades
+        .read()
+        .await
+        .get(&pair.a)
+        .unwrap()
+        .side(&pair.a)
+        .unwrap()
+        .items
+        .is_empty());
+    pair.game_state.set_item_locked(&pair.a, 1, false).await;
+    pair.game_state
+        .set_player_trade_offer(&pair.a, vec![slot(1, 1)], 0)
+        .await;
+    pair.game_state.set_item_locked(&pair.a, 1, true).await;
+    assert!(!bag_of(&pair.game_state, &pair.a).await[0].locked);
+    pair.game_state
+        .inventories
+        .write()
+        .await
+        .get_mut(&pair.a)
+        .unwrap()
+        .bag[0]
+        .locked = true;
+    complete_trade(&pair).await;
+    assert_eq!(bag_of(&pair.game_state, &pair.a).await.len(), 1);
+    assert!(bag_of(&pair.game_state, &pair.b).await.is_empty());
+    assert_eq!(gold_of(&pair.game_state, &pair.a).await, 100);
+}
+
 /// The last-second swap: changing an offer after locking moves the revision,
 /// so a confirm quoting the old one is refused and nothing moves.
 #[tokio::test]
@@ -254,6 +294,7 @@ async fn an_overweight_receiver_aborts_the_whole_trade() {
     // STR 12 → 180kg. One iron sword weighs far less, so pile on enough to
     // put the receiver over the line.
     let heavy = ItemInstance {
+        locked: false,
         instance_id: 1,
         item_def_id: "iron_sword".to_string(),
         quantity: 500,

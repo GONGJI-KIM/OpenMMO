@@ -54,6 +54,85 @@ fn item_quantity(inventory: &PlayerInventory, item_def_id: &str) -> u32 {
 }
 
 #[tokio::test]
+async fn item_locks_survive_storage_without_merging_with_unlocked_stacks() {
+    let game = make_flat_world_game_state("item_lock_storage");
+    let auth = make_test_auth("item_lock_storage");
+    let character_id = storage_owner(&game, &auth, "Lockkeeper").await;
+    let id = pid("Lockkeeper");
+    game.place_estate_chest(
+        &id,
+        2,
+        Position {
+            x: 2.5,
+            y: 5.0,
+            z: 2.5,
+        },
+        0.0,
+        0,
+        &auth,
+    )
+    .await;
+    let chest = auth.load_estate_chests().unwrap().remove(0);
+    game.set_item_locked(&id, 3, true).await;
+    game.transfer_estate_items(
+        &id,
+        chest.id,
+        vec![BagLineItem {
+            instance_id: 3,
+            qty: 2,
+        }],
+        vec![],
+        0,
+        &auth,
+    )
+    .await;
+    game.set_item_locked(&id, 3, false).await;
+    game.transfer_estate_items(
+        &id,
+        chest.id,
+        vec![BagLineItem {
+            instance_id: 3,
+            qty: 1,
+        }],
+        vec![],
+        1,
+        &auth,
+    )
+    .await;
+    let state = auth
+        .estate_chest_state(chest.id, character_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(state.items.len(), 2);
+    assert_eq!(state.items.iter().find(|i| i.locked).unwrap().quantity, 2);
+    assert_eq!(state.items.iter().find(|i| !i.locked).unwrap().quantity, 1);
+    let withdrawals = state
+        .items
+        .iter()
+        .map(|item| BagLineItem {
+            instance_id: item.instance_id,
+            qty: item.quantity,
+        })
+        .collect();
+    game.transfer_estate_items(&id, chest.id, vec![], withdrawals, state.revision, &auth)
+        .await;
+    let inv = game.get_player_inventory(&id).await.unwrap();
+    let apples: Vec<_> = inv
+        .bag
+        .iter()
+        .filter(|item| item.item_def_id == "apple")
+        .collect();
+    assert_eq!(apples.len(), 2);
+    assert_eq!(apples.iter().find(|i| i.locked).unwrap().quantity, 2);
+    assert_eq!(apples.iter().find(|i| !i.locked).unwrap().quantity, 1);
+    assert!(auth
+        .load_inventory(character_id)
+        .unwrap()
+        .iter()
+        .any(|i| i.locked && i.quantity == 2));
+}
+
+#[tokio::test]
 async fn estate_storage_can_be_placed_anywhere_on_owned_estate() {
     let game = make_flat_world_game_state("estate_storage_remote_placement");
     let (auth, _) = make_test_auth_with_path("estate_storage_remote_placement");

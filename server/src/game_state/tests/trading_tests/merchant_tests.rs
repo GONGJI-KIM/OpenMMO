@@ -1,6 +1,49 @@
 use super::*;
 
 #[tokio::test]
+async fn item_lock_blocks_single_sales_and_mixed_batch_sales() {
+    let game = make_test_game_state("item_lock_shop");
+    let (mut rx, _npc_rx) = setup_haggle(&game, 12, 0).await;
+    let id = pid("buyer");
+    game.inventories.write().await.insert(
+        id,
+        PlayerInventory {
+            bag: vec![
+                bag_item(11, "iron_sword", 1),
+                bag_item(12, "steel_longsword", 1),
+            ],
+            ..Default::default()
+        },
+    );
+    game.set_item_locked(&id, 12, true).await;
+    drain(&mut rx);
+    game.sell_item(&id, &pid("npc_rica"), 12).await;
+    expect_trade_error(&mut rx, "locked");
+    game.sell_items(
+        &id,
+        &pid("npc_rica"),
+        vec![
+            onlinerpg_shared::messages::BagLineItem {
+                instance_id: 11,
+                qty: 1,
+            },
+            onlinerpg_shared::messages::BagLineItem {
+                instance_id: 12,
+                qty: 1,
+            },
+        ],
+    )
+    .await;
+    expect_trade_error(&mut rx, "Unlock");
+    assert_eq!(game.get_player_inventory(&id).await.unwrap().bag.len(), 2);
+    assert_eq!(game.player_gold.read().await[&id], 0);
+    game.set_item_locked(&id, 12, false).await;
+    game.sell_item(&id, &pid("npc_rica"), 12).await;
+    assert_eq!(game.get_player_inventory(&id).await.unwrap().bag.len(), 1);
+    assert!(game.player_gold.read().await[&id] > 0);
+}
+
+#[tokio::test]
 async fn steward_sells_land_deeds_and_burns_the_purchase_gold() {
     let game_state = make_test_game_state("steward_land_deed");
     let buyer = pid("buyer");
@@ -585,6 +628,7 @@ async fn sell_item_applies_deal_bonus() {
         let mut inventories = game_state.inventories.write().await;
         let mut inv: onlinerpg_shared::inventory::PlayerInventory = Default::default();
         inv.bag.push(onlinerpg_shared::inventory::ItemInstance {
+            locked: false,
             instance_id: 7,
             item_def_id: "iron_sword".to_string(),
             quantity: 1,

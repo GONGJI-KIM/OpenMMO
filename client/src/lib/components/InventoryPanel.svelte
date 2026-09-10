@@ -1,10 +1,11 @@
 <script lang="ts">
   import {
     inventoryStore,
+    itemLockMode,
     playerGold,
     carryWeight,
     maxCarryWeight,
-    wornAmmoDefId,
+    wornAmmoStack,
   } from '../stores/inventoryStore'
   import { hungerState } from '../stores/hungerStore'
   import type { ItemInstance } from '../stores/inventoryStore'
@@ -22,7 +23,8 @@
   } from '../stores/dragStore'
   import { itemTooltip } from '../actions/itemTooltip'
   import { buildInventorySlots } from './inventorySlots'
-  import { sortBag } from './inventorySort'
+  import { inventoryGroupKey, sortBag } from './inventorySort'
+  import ItemLockButton from './ItemLockButton.svelte'
   import { groupBagForSelection, splitGroupQty } from './inventoryGroups'
   import QuantityPopup from './QuantityPopup.svelte'
   import { playerTrade, reservedQuantity } from '../stores/playerTradeStore'
@@ -40,12 +42,11 @@
 
   const maxWeight = $derived(maxCarryWeight(str, $hungerState))
 
-  // The worn quiver is drawn in the paperdoll's hand cell, so showing it here
-  // too would put one stack in two places.
-  const worn = $derived(wornAmmoDefId($inventoryStore))
+  // The character panel already displays the worn quiver.
+  const wornId = $derived(wornAmmoStack($inventoryStore)?.instance_id)
   const slots = $derived(
     buildInventorySlots(
-      sortBag($inventoryStore.bag.filter((item) => item.item_def_id !== worn))
+      sortBag($inventoryStore.bag.filter((item) => item.instance_id !== wornId))
     )
   )
 
@@ -54,20 +55,22 @@
     null
   )
 
-  /** Select mode: bulk-drop several different non-stackable items at once
-   *  (junk, unique gear) in a single drag. Stackable stacks keep the
-   *  separate single-drag + quantity-popup flow above and are inert here. */
+  // Select mode groups non-stackable items for bulk dropping.
   let selectMode = $state(false)
   const selected = new SvelteSet<number>()
   const bagIds = $derived(
-    new Set($inventoryStore.bag.map((item) => item.instance_id))
+    new Set(
+      $inventoryStore.bag
+        .filter((item) => !item.locked)
+        .map((item) => item.instance_id)
+    )
   )
 
-  // Closing the panel must not leave Select mode (and a stale selection)
-  // armed for whenever it's reopened.
+  // Closing the panel resets its editing modes.
   $effect(() => {
     if (!visible) {
       selectMode = false
+      itemLockMode.set(false)
       selected.clear()
       return
     }
@@ -81,11 +84,27 @@
   }
 
   function isSelectable(slot: ItemInstance): boolean {
-    return getItemDef(slot.item_def_id)?.stackable !== true
+    return !slot.locked && getItemDef(slot.item_def_id)?.stackable !== true
+  }
+
+  function lockTargets(slot: ItemInstance): number[] {
+    const key = inventoryGroupKey(slot)
+    return $inventoryStore.bag
+      .filter(
+        (item) => item.instance_id !== wornId && inventoryGroupKey(item) === key
+      )
+      .map((item) => item.instance_id)
   }
 
   function toggleSelectMode() {
     selectMode = !selectMode
+    itemLockMode.set(false)
+    selected.clear()
+  }
+
+  function toggleLockMode() {
+    itemLockMode.update((active) => !active)
+    selectMode = false
     selected.clear()
   }
 
@@ -99,13 +118,11 @@
    *  this (possibly merged-for-display) stack, since a merged slot's own
    *  instance_id may not itself hold that many units. */
   function dropQty(slot: ItemInstance, qty: number) {
-    const stackable = getItemDef(slot.item_def_id)?.stackable === true
-    const key = stackable
-      ? `${slot.item_def_id}:${slot.enchant}`
-      : `unique:${slot.instance_id}`
-    const group = groupBagForSelection($inventoryStore.bag).find(
-      (g) => g.key === key
-    )
+    if (slot.locked) return
+    const key = inventoryGroupKey(slot)
+    const group = groupBagForSelection(
+      $inventoryStore.bag.filter((item) => !item.locked)
+    ).find((g) => g.key === key)
     if (!group) return
     const lines = splitGroupQty(group, Math.min(qty, group.totalQty))
     networkManager.sendDropItems(
@@ -183,6 +200,7 @@
       (x, y) => {
         if (
           panelEl &&
+          !slot.locked &&
           !pointInRect(x, y, panelEl.getBoundingClientRect()) &&
           !isOverAnyDialog(x, y)
         ) {
@@ -251,6 +269,7 @@
           !pointInRect(x, y, panelEl.getBoundingClientRect()) &&
           !isOverAnyDialog(x, y)
         ) {
+          if (slot.locked) return
           if (slot.quantity > 1 && def) {
             pendingDrop = { slot, def }
           } else {
@@ -275,14 +294,26 @@
     <div class="panel-header" data-drag-handle>
       <span class="panel-title">Inventory</span>
       <span class="gold-display"><GoldAmount copper={$playerGold} /></span>
-      <button
-        class="select-btn"
-        class:active={selectMode}
-        title="Select multiple items to drop"
-        onclick={toggleSelectMode}
-      >
-        {selectMode ? 'Cancel' : 'Select'}
-      </button>
+      <div class="mode-buttons">
+        <button
+          class="mode-btn select-btn"
+          class:active={selectMode}
+          aria-pressed={selectMode}
+          title="Select multiple items to drop"
+          onclick={toggleSelectMode}
+        >
+          {selectMode ? 'Cancel' : 'Select'}
+        </button>
+        <button
+          class="mode-btn lock-btn"
+          class:active={$itemLockMode}
+          aria-pressed={$itemLockMode}
+          title={$itemLockMode
+            ? 'Finish editing item locks'
+            : 'Edit item locks'}
+          onclick={toggleLockMode}>Lock</button
+        >
+      </div>
       <button class="close-btn" onclick={onClose}>&times;</button>
     </div>
 
@@ -317,6 +348,12 @@
           {/if}
           {#if slot && slot.enchant > 0}
             <span class="item-enchant">+{slot.enchant}</span>
+          {/if}
+          {#if slot && ($itemLockMode || slot.locked)}
+            <ItemLockButton
+              item={slot}
+              getInstanceIds={() => lockTargets(slot)}
+            />
           {/if}
           {#if slot && slot.quantity > 1}
             <span class="item-qty">{slot.quantity}</span>
@@ -410,7 +447,12 @@
     color: #ffd700;
   }
 
-  .select-btn {
+  .mode-buttons {
+    display: flex;
+    gap: 4px;
+  }
+
+  .mode-btn {
     background: none;
     border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 4px;
@@ -422,7 +464,7 @@
     padding: 2px 6px;
   }
 
-  .select-btn:hover {
+  .mode-btn:hover {
     color: #fff;
     border-color: rgba(255, 255, 255, 0.4);
   }
@@ -431,6 +473,12 @@
     background: rgba(120, 60, 60, 0.85);
     border-color: rgba(220, 140, 140, 0.45);
     color: #fff;
+  }
+
+  .lock-btn.active {
+    background: #604b20;
+    border-color: #d2a63c;
+    color: #fff0c5;
   }
 
   .bag-grid {
@@ -490,8 +538,8 @@
 
   .item-selected-check {
     position: absolute;
-    top: 2px;
-    right: 4px;
+    bottom: 3px;
+    left: 4px;
     font-size: 12px;
     font-weight: 700;
     color: #f0b8b8;
