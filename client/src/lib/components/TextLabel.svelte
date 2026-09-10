@@ -96,6 +96,7 @@
     ctx.font = font
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
+    ctx.textAlign = 'left'
     ctx.textBaseline = 'top'
 
     for (let i = 0; i < lines.length; i++) {
