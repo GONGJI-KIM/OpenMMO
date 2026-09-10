@@ -919,6 +919,7 @@ pub fn dungeon_passability(entrance: &Position, layouts: &[FloorLayout]) -> Runt
         floors,
         stairwells,
         yields_to_trapped_mover: false,
+        allows_projectiles: false,
         is_ground: false,
     }
 }

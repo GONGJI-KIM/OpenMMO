@@ -95,6 +95,7 @@ pub fn build_runtime_passability(house: &HouseData) -> RuntimePassability {
         floors,
         stairwells,
         yields_to_trapped_mover: false,
+        allows_projectiles: false,
         is_ground: true,
     }
 }
@@ -273,6 +274,7 @@ pub fn build_furniture_passability(pieces: &[FurniturePiece]) -> Option<RuntimeP
         // The only builder that seals every side of a cell, and the only
         // obstacle that can land on top of a standing player.
         yields_to_trapped_mover: true,
+        allows_projectiles: false,
         is_ground: false,
     })
 }

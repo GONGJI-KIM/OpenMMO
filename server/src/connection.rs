@@ -704,9 +704,7 @@ fn requires_admin(msg: &ClientMessage) -> bool {
         | ClientMessage::DebugSetTime { .. }
         | ClientMessage::DebugResetDungeonProps { .. } => true,
         ClientMessage::ChatMessage { message } => {
-            message.starts_with("/give ")
-                || parse_notice_command(message).is_some()
-                || parse_admin_command(message).is_some()
+            parse_notice_command(message).is_some() || parse_admin_command(message).is_some()
         }
         _ => false,
     }
@@ -2627,6 +2625,9 @@ mod tests {
             message: "/notice".into()
         }));
         for admin_command in [
+            "/give",
+            "/give iron_arrow 100",
+            "  /give iron_arrow 100  ",
             "/kick Abuser",
             "/mute Abuser 5",
             "/unmute Abuser",
@@ -2646,6 +2647,9 @@ mod tests {
         }));
         assert!(!requires_admin(&ClientMessage::ChatMessage {
             message: "/who".into()
+        }));
+        assert!(!requires_admin(&ClientMessage::ChatMessage {
+            message: "/giveaway".into()
         }));
         assert!(!requires_admin(&ClientMessage::Heartbeat));
     }

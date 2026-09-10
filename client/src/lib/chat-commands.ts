@@ -155,7 +155,10 @@ const COMMANDS: Record<string, Command> = {
       emoteRequest.set(name)
     },
   },
-  '/give': { desc: 'Give yourself an item: /give <item_id>', admin: true },
+  '/give': {
+    desc: 'Give yourself items: /give <item_id> [count] (default 1, max 10000)',
+    admin: true,
+  },
   '/spawnmob': {
     desc: 'Spawn monsters beside you: /spawnmob <type> [count]',
     admin: true,

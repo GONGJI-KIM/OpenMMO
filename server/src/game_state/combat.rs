@@ -99,14 +99,20 @@ pub(super) fn reachable_dist_sq(a: Position, a_floor: i8, b: Position, b_floor: 
     dist_sq.is_finite().then_some(dist_sq)
 }
 
-/// [`pathfinding::attack_line_blocked`] against a wire floor level.
+/// Attack collision against a wire floor level.
 fn wall_between(
     cache: &onlinerpg_shared::pathfinding::PassabilityCache,
     from: Position,
     to: Position,
     floor_level: i8,
+    ranged: bool,
 ) -> bool {
-    onlinerpg_shared::pathfinding::attack_line_blocked(
+    let blocked = if ranged {
+        onlinerpg_shared::pathfinding::ranged_attack_line_blocked
+    } else {
+        onlinerpg_shared::pathfinding::attack_line_blocked
+    };
+    blocked(
         cache,
         from.x,
         from.z,
@@ -495,6 +501,7 @@ impl super::GameState {
                 player_position,
                 gate_position,
                 player_floor,
+                weapon.ability.is_some(),
             )
         };
         if distance_sq > attack_range.powi(2) {
@@ -1132,6 +1139,7 @@ impl super::GameState {
             monster_position,
             target_position,
             monster_floor_level,
+            false,
         ) {
             audit.reason = "wall";
             debug!(

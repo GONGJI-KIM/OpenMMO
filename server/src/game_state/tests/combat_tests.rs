@@ -1396,9 +1396,71 @@ async fn a_melee_weapon_keeps_its_hardcoded_reach() {
 }
 
 #[tokio::test]
+async fn a_bow_shoots_over_a_fence_at_close_and_long_range() {
+    for distance in [1.5, 8.5] {
+        let game_state = make_test_game_state(&format!("bow_over_fence_{distance}"));
+        let mut rx = setup_archer(&game_state, "bow", attrs_with(10, 30)).await;
+        add_combat_fence(&game_state);
+        game_state.monsters.write().await.insert(
+            "behind".to_string(),
+            make_monster("behind", at(distance), 0),
+        );
+
+        game_state
+            .broadcast_player_attack(&pid("archer"), "behind".to_string())
+            .await;
+
+        let (hit, damage) = expect_attacked(&mut rx, "behind");
+        assert!(hit);
+        assert!(damage > 0);
+        assert_eq!(
+            game_state.inventories.read().await[&pid("archer")].bag[0].quantity,
+            19
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_melee_attack_through_a_fence_is_rejected() {
+    let game_state = make_test_game_state("melee_blocked_by_fence");
+    let mut rx = setup_archer(&game_state, "dagger", attrs_with(30, 10)).await;
+    add_combat_fence(&game_state);
+    game_state
+        .monsters
+        .write()
+        .await
+        .insert("behind".to_string(), make_monster("behind", at(1.5), 0));
+
+    game_state
+        .broadcast_player_attack(&pid("archer"), "behind".to_string())
+        .await;
+
+    expect_attack_rejected(&mut rx, "behind", AttackRejectReason::OutOfRange);
+}
+
+fn add_combat_fence(game_state: &GameState) {
+    use onlinerpg_shared::fence::{sync_passability, Fence, FenceAxis, FenceEdge};
+
+    sync_passability(
+        &mut game_state.passability_write(),
+        "fences",
+        &[Fence {
+            edge: FenceEdge {
+                x: 1,
+                z: 0,
+                axis: FenceAxis::Z,
+            },
+            y: 0.0,
+            owner_id: 1,
+        }],
+    );
+}
+
+#[tokio::test]
 async fn a_bow_shot_through_a_wall_is_rejected() {
     let game_state = make_test_game_state("bow_walled_off");
     let mut rx = setup_archer(&game_state, "bow", attrs_with(10, 30)).await;
+    add_combat_fence(&game_state);
     game_state.sync_region_furniture(0, 0, &[table_placement(4.5, 0.5)]);
     game_state
         .monsters

@@ -275,8 +275,7 @@ fn stack_into_bag_unfolds_non_stackable_quantities_into_one_slot_each() {
     assert_eq!(apples[0].quantity, 8);
 }
 
-/// give_item feeds /give, dungeon chest loot, and grilling — repeated grants
-/// of a stackable must share one bag entry.
+/// Repeated grants merge stackable items.
 #[tokio::test]
 async fn give_item_stacks_repeated_grants() {
     let game_state = make_test_game_state("give_item_stacks");
@@ -304,6 +303,45 @@ async fn give_item_stacks_repeated_grants() {
         .filter(|i| i.item_def_id == "fishing_rod")
         .collect();
     assert_eq!(rods.len(), 2, "non-stackables keep their own slots");
+}
+
+#[tokio::test]
+async fn give_items_refuses_stack_overflow_without_a_partial_grant() {
+    let game_state = make_test_game_state("give_stack_overflow");
+    let player_id = pid("archer");
+    game_state.add_player(make_player("archer", 0.0, 0.0)).await;
+    let mut inventory: onlinerpg_shared::inventory::PlayerInventory = Default::default();
+    inventory
+        .bag
+        .push(bag_item(10, "iron_arrow", u32::MAX - 50));
+    game_state
+        .inventories
+        .write()
+        .await
+        .insert(player_id, inventory);
+
+    assert!(game_state
+        .give_items(&player_id, "iron_arrow", 100)
+        .await
+        .is_err());
+    assert_eq!(
+        game_state.inventories.read().await[&player_id].bag[0].quantity,
+        u32::MAX - 50
+    );
+    assert!(!game_state
+        .dirty_inventories
+        .read()
+        .await
+        .contains(&player_id));
+    assert!(game_state
+        .give_items(&player_id, "iron_arrow", 50)
+        .await
+        .is_ok());
+    assert_eq!(
+        game_state.inventories.read().await[&player_id].bag[0].quantity,
+        u32::MAX
+    );
+    assert!(!game_state.give_item(&player_id, "iron_arrow").await);
 }
 
 /// Dropping from a stack must shed exactly one unit — before the stacking fix

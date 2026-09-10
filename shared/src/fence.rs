@@ -111,6 +111,7 @@ pub fn sync_passability(cache: &mut PassabilityCache, key: &str, fences: &[Fence
             floors,
             stairwells: vec![],
             yields_to_trapped_mover: false,
+            allows_projectiles: true,
             is_ground: false,
         },
     );
@@ -119,7 +120,10 @@ pub fn sync_passability(cache: &mut PassabilityCache, key: &str, fences: &[Fence
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pathfinding::{is_cardinal_move_blocked, is_movement_blocked};
+    use crate::pathfinding::{
+        attack_line_blocked, is_cardinal_move_blocked, is_movement_blocked,
+        ranged_attack_line_blocked,
+    };
 
     #[test]
     fn paths_from_beside_a_fence_tip_do_not_cross_the_fence() {
@@ -185,6 +189,10 @@ mod tests {
             );
             let [a, b] = edge.adjacent_centers();
             for (from, to) in [(a, b), (b, a)] {
+                assert!(attack_line_blocked(&cache, from.x, from.z, to.x, to.z, 0));
+                assert!(!ranged_attack_line_blocked(
+                    &cache, from.x, from.z, to.x, to.z, 0
+                ));
                 assert!(is_movement_blocked(
                     &cache,
                     from.x,

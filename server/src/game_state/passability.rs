@@ -605,6 +605,7 @@ mod tests {
                     reversed: false,
                 }],
                 yields_to_trapped_mover: false,
+                allows_projectiles: false,
                 is_ground: true,
             },
         );

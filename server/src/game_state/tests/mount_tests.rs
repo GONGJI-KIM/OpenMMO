@@ -313,6 +313,7 @@ async fn horse_cannot_mount_indoors_and_dismounts_on_entry() {
             floors: vec![],
             stairwells: vec![],
             yields_to_trapped_mover: false,
+            allows_projectiles: false,
             is_ground: true,
         },
     );

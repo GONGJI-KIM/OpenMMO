@@ -347,8 +347,8 @@ guard 40짜리 플레이어를 코볼트가 한 번 맞히려면 평균 400회, 
 ### 사거리 게이트
 
 `validate_player_attack`이 `max(근접 리치, 무기 range)`로 판정한다. 벽 검사
-(`attack_line_blocked`)는 근접과 동일하게 걸리므로, 벽·닫힌 문·가구로 막힌
-칸 너머로는 쏠 수 없다. 사거리 밖 공격은 종전대로
+(`ranged_attack_line_blocked`)는 울타리를 통과시키지만, 벽·닫힌 문·가구로 막힌
+칸 너머로는 쏠 수 없다. 울타리는 이동과 근접 공격을 계속 막는다. 사거리 밖 공격은 종전대로
 `PLAYER_ATTACK_PROVOKE_RANGE_METERS`(10m) 안에서 어그로만 끈다.
 
 클라이언트도 같은 `data/items.json` 열을 읽는다(`weaponRangeMeters`). 클릭

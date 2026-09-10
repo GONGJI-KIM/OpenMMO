@@ -112,6 +112,14 @@ pub(super) struct BagInsert<'a> {
 }
 
 impl<'a> BagInsert<'a> {
+    fn matches_stack(&self, item: &ItemInstance) -> bool {
+        item.item_def_id == self.item_def_id
+            && item.locked == self.locked
+            && item.enchant == self.enchant
+            && item.cape_color == self.cape_color
+            && item.cape_texture == self.cape_texture
+    }
+
     pub(super) fn one(
         stackable: bool,
         item_def_id: &'a str,
@@ -149,6 +157,18 @@ pub(super) struct BagInsertResult {
 
 /// Merge matching stacks and report the destination and allocated IDs.
 pub(super) fn stack_into_bag(bag: &mut Vec<ItemInstance>, insert: BagInsert) -> BagInsertResult {
+    if insert.quantity == 0 {
+        return BagInsertResult::default();
+    }
+    if insert.stackable {
+        if let Some(stack) = bag.iter_mut().find(|item| insert.matches_stack(item)) {
+            stack.quantity += insert.quantity;
+            return BagInsertResult {
+                ids_used: 0,
+                first_instance_id: Some(stack.instance_id),
+            };
+        }
+    }
     let BagInsert {
         locked,
         stackable,
@@ -159,24 +179,7 @@ pub(super) fn stack_into_bag(bag: &mut Vec<ItemInstance>, insert: BagInsert) -> 
         first_instance_id,
         quantity,
     } = insert;
-    if quantity == 0 {
-        return BagInsertResult::default();
-    }
-
     if stackable {
-        if let Some(stack) = bag.iter_mut().find(|item| {
-            item.item_def_id == item_def_id
-                && item.locked == locked
-                && item.enchant == enchant
-                && item.cape_color == cape_color
-                && item.cape_texture == cape_texture
-        }) {
-            stack.quantity += quantity;
-            return BagInsertResult {
-                ids_used: 0,
-                first_instance_id: Some(stack.instance_id),
-            };
-        }
         bag.push(ItemInstance {
             locked,
             instance_id: first_instance_id,
@@ -541,28 +544,49 @@ impl super::GameState {
     }
 
     pub async fn give_item(&self, player_id: &PlayerId, item_def_id: &str) -> bool {
+        self.give_items(player_id, item_def_id, 1).await.is_ok()
+    }
+
+    pub(super) async fn give_items(
+        &self,
+        player_id: &PlayerId,
+        item_def_id: &str,
+        quantity: u32,
+    ) -> Result<(), String> {
+        if quantity == 0 {
+            return Err("Give: count must be positive.".to_string());
+        }
         let Some(stackable) = self.item_defs.get(item_def_id).map(|d| d.stackable) else {
             warn!("give_item: unknown item_def_id {:?}", item_def_id);
-            return false;
+            return Err(format!("Unknown item: {item_def_id}"));
         };
 
-        let instance_id = self.next_instance_id().await;
+        let instance_id = self
+            .reserve_instance_ids(if stackable { 1 } else { quantity as u64 })
+            .await;
+        let insert = BagInsert {
+            quantity,
+            ..BagInsert::one(stackable, item_def_id, 0, instance_id)
+        };
         let snapshot = {
             let mut inventories = self.inventories.write().await;
-            let inv = match inventories.get_mut(player_id) {
-                Some(inv) => inv,
-                None => return false,
-            };
-            stack_into_bag(
-                &mut inv.bag,
-                BagInsert::one(stackable, item_def_id, 0, instance_id),
-            );
+            let inv = inventories
+                .get_mut(player_id)
+                .ok_or("Give: inventory unavailable.")?;
+            if stackable
+                && inv.bag.iter().any(|item| {
+                    insert.matches_stack(item) && item.quantity.checked_add(quantity).is_none()
+                })
+            {
+                return Err("Give: item stack is full.".to_string());
+            }
+            stack_into_bag(&mut inv.bag, insert);
             inv.clone()
         };
 
         self.mark_inventory_dirty(player_id).await;
         self.send_inventory_snapshot(player_id, snapshot).await;
-        true
+        Ok(())
     }
 
     /// Award one unit of an item, respecting the carry-weight cap: stacks onto

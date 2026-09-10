@@ -155,6 +155,7 @@ async fn estate_return_scroll_avoids_buildings_and_searches_other_owned_plots() 
             }],
             stairwells: vec![],
             yields_to_trapped_mover: false,
+            allows_projectiles: false,
             is_ground: true,
         },
     );

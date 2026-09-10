@@ -31,8 +31,8 @@ pub use query::{
     attack_line_blocked, attack_line_blocked_in, blocking_entry_for_mover, get_floor_at_position,
     get_floor_y_base, in_stairwell_span, is_cardinal_move_blocked, is_cell_sealed,
     is_circle_blocked_on_floor, is_movement_blocked, is_movement_blocked_for_mover,
-    leg_touches_stairwell, snap_goal_into_floor, start_floor_at, storey_ground_y,
-    supporting_floor_y, BlockInfo,
+    leg_touches_stairwell, ranged_attack_line_blocked, snap_goal_into_floor, start_floor_at,
+    storey_ground_y, supporting_floor_y, BlockInfo,
 };
 pub(crate) use query::{ramp_fraction, segment_touches_box};
 pub use smooth::{find_and_smooth_path, find_and_smooth_path_avoiding};
@@ -86,6 +86,7 @@ pub struct RuntimePassability {
     /// only for furniture, the one kind that can land on a standing player.
     /// See `query::blocking_entry_for_mover`.
     pub yields_to_trapped_mover: bool,
+    pub allows_projectiles: bool,
     /// Whether its grids are storeys a mover stands on (a house). False for
     /// furniture and for a dungeon, whose surface shell is one flat grid over
     /// the whole footprint — a collision hull, not ground.
@@ -157,6 +158,7 @@ mod tests {
             }],
             stairwells: vec![],
             yields_to_trapped_mover: false,
+            allows_projectiles: false,
             is_ground: true,
         };
         ("house".to_string(), rp)
@@ -277,16 +279,12 @@ mod tests {
         let mut cache = PassabilityCache::new();
         cache.insert(id, rp);
 
-        // Either side of the stub, a metre apart: well inside melee reach and
-        // still unreachable.
-        assert!(attack_line_blocked(&cache, 13.5, 11.5, 13.5, 12.5, 0));
-        // Same metre clear of the stub lands.
-        assert!(!attack_line_blocked(&cache, 11.5, 11.5, 11.5, 12.5, 0));
-        // Reach is a point, not a body: grazing the stub inside body radius is
-        // no wall to a blade.
-        assert!(!attack_line_blocked(&cache, 11.5, 12.2, 16.5, 12.2, 0));
-        // Walls belong to their own floor, as everywhere else in the cache.
-        assert!(!attack_line_blocked(&cache, 13.5, 11.5, 13.5, 12.5, 1));
+        for blocked in [attack_line_blocked, ranged_attack_line_blocked] {
+            assert!(blocked(&cache, 13.5, 11.5, 13.5, 12.5, 0));
+            assert!(!blocked(&cache, 11.5, 11.5, 11.5, 12.5, 0));
+            assert!(!blocked(&cache, 11.5, 12.2, 16.5, 12.2, 0));
+            assert!(!blocked(&cache, 13.5, 11.5, 13.5, 12.5, 1));
+        }
     }
 
     #[test]
@@ -678,6 +676,7 @@ mod tests {
                 reversed: false,
             }],
             yields_to_trapped_mover: false,
+            allows_projectiles: false,
             is_ground: true,
         };
         ("two_floor".to_string(), rp)
@@ -983,6 +982,7 @@ mod tests {
                 reversed: false,
             }],
             yields_to_trapped_mover: false,
+            allows_projectiles: false,
             is_ground: true,
         };
         ("house".to_string(), rp)
@@ -1113,6 +1113,7 @@ mod tests {
                 }],
                 stairwells: vec![],
                 yields_to_trapped_mover: false,
+                allows_projectiles: false,
                 is_ground: true,
             },
         );
@@ -1214,6 +1215,7 @@ mod real_house_repro {
                 reversed: true,
             }],
             yields_to_trapped_mover: false,
+            allows_projectiles: false,
             is_ground: true,
         };
         ("r-23_+73_1".to_string(), rp)
@@ -1298,6 +1300,7 @@ mod real_house_repro {
                 reversed: false,
             }],
             yields_to_trapped_mover: false,
+            allows_projectiles: false,
             is_ground: true,
         };
         ("dungeon:old_crypt".to_string(), rp)

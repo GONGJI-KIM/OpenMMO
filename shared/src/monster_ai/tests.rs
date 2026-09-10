@@ -2169,6 +2169,7 @@ fn shaft_room() -> crate::pathfinding::PassabilityCache {
         }],
         stairwells: vec![],
         yields_to_trapped_mover: false,
+        allows_projectiles: false,
         is_ground: true,
     };
     let mut cache = PassabilityCache::new();

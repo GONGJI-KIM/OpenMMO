@@ -323,8 +323,7 @@ pub fn passability_is_movement_blocked(
     })
 }
 
-/// The gate the server applies to every landed blow, so the client stops
-/// swinging through shut doors instead of collecting rejections.
+/// Match the server's attack collision for the equipped weapon.
 #[wasm_bindgen]
 pub fn passability_attack_line_blocked(
     from_x: f32,
@@ -332,8 +331,14 @@ pub fn passability_attack_line_blocked(
     to_x: f32,
     to_z: f32,
     floor_level: u8,
+    ranged: bool,
 ) -> bool {
-    with_cache(|c| pathfinding::attack_line_blocked(c, from_x, from_z, to_x, to_z, floor_level))
+    let blocked = if ranged {
+        pathfinding::ranged_attack_line_blocked
+    } else {
+        pathfinding::attack_line_blocked
+    };
+    with_cache(|c| blocked(c, from_x, from_z, to_x, to_z, floor_level))
 }
 
 #[wasm_bindgen]

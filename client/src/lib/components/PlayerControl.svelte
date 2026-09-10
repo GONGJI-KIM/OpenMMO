@@ -57,7 +57,11 @@
   } from '../stores/debugStore'
   import { localTorchEquipped, inventoryStore } from '../stores/inventoryStore'
   import { hungerState, SPRINT_MIN_SATIATION } from '../stores/hungerStore'
-  import { getItemDef, weaponRangeMeters } from '../data/itemDefs'
+  import {
+    getItemDef,
+    isRangedWeapon,
+    weaponRangeMeters,
+  } from '../data/itemDefs'
   import {
     DEFAULT_MOVEMENT_CONFIG,
     SPRINT_SPEED_MULT,
@@ -831,10 +835,16 @@
     return weaponRangeMeters($inventoryStore.equipped.main_hand?.item_def_id)
   }
 
-  /** Whether a wall stands between two points — the server's own gate on every
-   *  blow. Also the movement tick's `attackLineBlocked`. */
+  /** Shared by click attacks and the chase tick. */
   function attackLineBlocked(from: Position, to: Position, floor: number) {
-    return housingManager.attackLineBlocked(from.x, from.z, to.x, to.z, floor)
+    return housingManager.attackLineBlocked(
+      from.x,
+      from.z,
+      to.x,
+      to.z,
+      floor,
+      isRangedWeapon($inventoryStore.equipped.main_hand?.item_def_id)
+    )
   }
 
   /** Take the monster as a target and walk at it, attacking on arrival. */

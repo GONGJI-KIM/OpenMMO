@@ -521,18 +521,23 @@ export class HousingManager {
     )
   }
 
-  /**
-   * Whether a wall stands between attacker and target — the gate the server
-   * applies to every blow. `floorLevel` is the passability floor index, as above.
-   */
+  /** Attack collision on the passability floor, matching the server. */
   attackLineBlocked(
     fromX: number,
     fromZ: number,
     toX: number,
     toZ: number,
-    floorLevel: number
+    floorLevel: number,
+    ranged = false
   ): boolean {
-    return passability_attack_line_blocked(fromX, fromZ, toX, toZ, floorLevel)
+    return passability_attack_line_blocked(
+      fromX,
+      fromZ,
+      toX,
+      toZ,
+      floorLevel,
+      ranged
+    )
   }
 
   /** Check if a circle of radius r at (x, z) overlaps any blocking wall. */

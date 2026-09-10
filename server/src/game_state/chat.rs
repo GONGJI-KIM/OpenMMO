@@ -23,6 +23,7 @@ const BAN_MAX_MINUTES: i64 = 525_600;
 const SPAWNMOB_MAX_COUNT: u32 = 10;
 /// Meters from the admin to each spawned monster.
 const SPAWNMOB_RING_RADIUS: f32 = 3.0;
+const GIVE_MAX_COUNT: u32 = 10_000;
 
 /// `/who` breakdown. Splits by client program rather than by "human vs bot":
 /// the server cannot tell whether a person or an LLM is driving a web client,
@@ -218,6 +219,10 @@ pub(crate) fn parse_say_command(message: &str) -> Option<&str> {
 /// reply instead of leaking into local chat.
 #[derive(Debug, PartialEq)]
 pub(crate) enum AdminCommand<'a> {
+    Give {
+        item_def_id: &'a str,
+        count: Option<&'a str>,
+    },
     Kick(&'a str),
     Ban {
         name: &'a str,
@@ -238,6 +243,10 @@ pub(crate) enum AdminCommand<'a> {
 }
 
 pub(crate) fn parse_admin_command(message: &str) -> Option<AdminCommand<'_>> {
+    if let Some(rest) = strip_command(message, "/give") {
+        let (item_def_id, count) = split_name_and_arg(rest);
+        return Some(AdminCommand::Give { item_def_id, count });
+    }
     if let Some(rest) = strip_command(message, "/kick") {
         return Some(AdminCommand::Kick(rest));
     }
@@ -374,20 +383,6 @@ impl super::GameState {
                 OnlineCounts::tally(players.values())
             };
             self.send_system_message(player_id, counts.describe()).await;
-            return;
-        }
-
-        // Handle /give command
-        if let Some(item_id) = message.strip_prefix("/give ") {
-            let item_id = item_id.trim();
-            if self.give_item(player_id, item_id).await {
-                info!(player = ?player_id, item = item_id, "item granted via /give");
-                self.send_system_message(player_id, format!("Gave item: {}", item_id))
-                    .await;
-            } else {
-                self.send_system_message(player_id, format!("Unknown item: {}", item_id))
-                    .await;
-            }
             return;
         }
 
@@ -987,6 +982,9 @@ impl super::GameState {
         auth: &AuthService,
     ) {
         let reply = match command {
+            AdminCommand::Give { item_def_id, count } => {
+                self.give_command(admin_id, item_def_id, count).await
+            }
             AdminCommand::Kick(name) => self.kick_command(admin_id, name, auth).await,
             AdminCommand::Mute { name, minutes } => {
                 self.mute_command(admin_id, name, minutes).await
@@ -1005,6 +1003,24 @@ impl super::GameState {
         }
         .unwrap_or_else(std::convert::identity);
         self.send_system_message(admin_id, reply).await;
+    }
+
+    async fn give_command(
+        &self,
+        admin_id: &PlayerId,
+        item_def_id: &str,
+        raw_count: Option<&str>,
+    ) -> Result<String, String> {
+        if item_def_id.is_empty() {
+            return Err("Give: /give <item_id> [count]".to_string());
+        }
+        let count = raw_count
+            .map(|raw| parse_bounded(raw, 1..=GIVE_MAX_COUNT, "Give: count"))
+            .transpose()?
+            .unwrap_or(1);
+        self.give_items(admin_id, item_def_id, count).await?;
+        info!(player = ?admin_id, item = item_def_id, count, "items granted via /give");
+        Ok(format!("Gave item: {item_def_id} x{count}"))
     }
 
     /// Shared preamble for admin commands aimed at an online player: usage on

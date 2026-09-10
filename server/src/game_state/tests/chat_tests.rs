@@ -844,6 +844,105 @@ fn admin_command_parses_actions() {
     assert_eq!(parse_admin_command("/kick"), Some(AdminCommand::Kick("")));
 }
 
+#[tokio::test]
+async fn give_command_supports_counts_and_defaults_to_one() {
+    let game_state = make_test_game_state("give_counts");
+    let auth = make_test_auth("give_counts");
+    let admin_id = pid("admin");
+    game_state.add_player(make_player("admin", 0.0, 0.0)).await;
+    game_state
+        .inventories
+        .write()
+        .await
+        .insert(admin_id, Default::default());
+    let mut rx = game_state.register_direct_channel(&admin_id).await;
+
+    for (command, item, quantity) in [
+        ("/give iron_arrow 100", "iron_arrow", 100),
+        ("/give iron_arrow", "iron_arrow", 1),
+        ("  /give fishing_rod   3  ", "fishing_rod", 3),
+        ("/give fishing_rod", "fishing_rod", 1),
+    ] {
+        game_state
+            .send_chat_message(&admin_id, command.to_string(), &auth)
+            .await;
+        let messages = drain(&mut rx);
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|m| matches!(m, ServerMessage::InventoryUpdated { .. }))
+                .count(),
+            1
+        );
+        assert!(messages.iter().any(|m| matches!(
+            m,
+            ServerMessage::SystemMessage { message }
+                if message == &format!("Gave item: {item} x{quantity}")
+        )));
+    }
+
+    let inventories = game_state.inventories.read().await;
+    let bag = &inventories[&admin_id].bag;
+    assert_eq!(bag.len(), 5);
+    assert_eq!(bag[0].item_def_id, "iron_arrow");
+    assert_eq!(bag[0].quantity, 101);
+    assert!(bag[1..]
+        .iter()
+        .all(|i| i.item_def_id == "fishing_rod" && i.quantity == 1));
+    let ids: std::collections::HashSet<_> = bag.iter().map(|i| i.instance_id).collect();
+    assert_eq!(ids.len(), bag.len());
+    assert!(game_state
+        .dirty_inventories
+        .read()
+        .await
+        .contains(&admin_id));
+}
+
+#[tokio::test]
+async fn give_command_rejects_bad_counts_and_unknown_items_without_granting() {
+    let game_state = make_test_game_state("give_bad_counts");
+    let auth = make_test_auth("give_bad_counts");
+    let admin_id = pid("admin");
+    game_state.add_player(make_player("admin", 0.0, 0.0)).await;
+    game_state
+        .inventories
+        .write()
+        .await
+        .insert(admin_id, Default::default());
+    let mut rx = game_state.register_direct_channel(&admin_id).await;
+
+    for (command, error) in [
+        ("/give", "Give: /give <item_id> [count]"),
+        ("/give missing_item 100", "Unknown item: missing_item"),
+        ("/give iron_arrow 0", "Give: count must be 1–10000."),
+        ("/give iron_arrow -1", "Give: count must be 1–10000."),
+        ("/give iron_arrow 1.5", "Give: count must be 1–10000."),
+        ("/give iron_arrow many", "Give: count must be 1–10000."),
+        ("/give iron_arrow 10001", "Give: count must be 1–10000."),
+        (
+            "/give iron_arrow 4294967296",
+            "Give: count must be 1–10000.",
+        ),
+        ("/give iron_arrow 100 extra", "Give: count must be 1–10000."),
+    ] {
+        game_state
+            .send_chat_message(&admin_id, command.to_string(), &auth)
+            .await;
+        assert!(matches!(
+            drain(&mut rx).as_slice(),
+            [ServerMessage::SystemMessage { message }] if message == error
+        ));
+    }
+    assert!(game_state.inventories.read().await[&admin_id]
+        .bag
+        .is_empty());
+    assert!(!game_state
+        .dirty_inventories
+        .read()
+        .await
+        .contains(&admin_id));
+}
+
 /// The ban is stored per account, so eviction has to be per account too. A
 /// session playing an alt — or sitting at character select with no character
 /// at all — must still be closed.
