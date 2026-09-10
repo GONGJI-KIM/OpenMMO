@@ -8,7 +8,8 @@
 
 use super::astar::{find_path_avoiding, segment_enters_cells};
 use super::query::{
-    is_cardinal_move_blocked, is_circle_blocked_on_floor, segment_obstacles, SegmentObstacles,
+    is_cardinal_move_blocked, is_circle_blocked_on_floor, is_movement_blocked, segment_obstacles,
+    SegmentObstacles,
 };
 use super::{PassabilityCache, PathResult, PathWaypoint};
 
@@ -79,16 +80,11 @@ fn line_passable_avoiding(
 ) -> bool {
     if !cells_line_passable(from, to, cache)
         || segment_enters_cells(from.x, from.z, to.x, to.z, blocked)
+        || is_movement_blocked(cache, from.x, from.z, to.x, to.z, from.floor, None)
     {
         return false;
     }
-    // Cell-edge traversal permits diagonals whose interior grazes a convex wall
-    // corner within the body radius — the continuous mover then refuses to
-    // cross, stranding anything without a wall-slide fallback (monsters, agents).
-    // Reject such a segment ONLY when it's a genuine mid-path "notch": both
-    // endpoints clear of walls but the interior isn't. When an endpoint sits
-    // against a wall, a near-wall start/goal is expected and the mover just
-    // stops short there, so leave the segment passable.
+    // Allow endpoints near walls, but only after ruling out actual edge crossings.
     let r = PLAYER_RADIUS;
     if is_circle_blocked_on_floor(cache, from.x, from.z, r, from.floor, None)
         || is_circle_blocked_on_floor(cache, to.x, to.z, r, from.floor, None)

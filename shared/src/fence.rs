@@ -122,6 +122,54 @@ mod tests {
     use crate::pathfinding::{is_cardinal_move_blocked, is_movement_blocked};
 
     #[test]
+    fn paths_from_beside_a_fence_tip_do_not_cross_the_fence() {
+        use crate::pathfinding::find_and_smooth_path;
+
+        for axis in [FenceAxis::Z, FenceAxis::X] {
+            let orient = |(x, z)| match axis {
+                FenceAxis::Z => (x, z),
+                FenceAxis::X => (z, x),
+            };
+            let (x, z) = orient((-1555.0, 4704.0));
+            let mut cache = PassabilityCache::new();
+            sync_passability(
+                &mut cache,
+                "fences",
+                &[Fence {
+                    edge: FenceEdge {
+                        x: x as i32,
+                        z: z as i32,
+                        axis,
+                    },
+                    y: 0.5,
+                    owner_id: 1,
+                }],
+            );
+            let start = orient((-1554.9276, 4705.031));
+            let goal = orient((-1574.5, 4695.5));
+            for (from, to) in [(start, goal), (goal, start)] {
+                assert!(is_movement_blocked(
+                    &cache, from.0, from.1, to.0, to.1, 0, None,
+                ));
+                let path = find_and_smooth_path(from.0, from.1, 0, to.0, to.1, 0, &cache, 10_000);
+                assert!(path.found, "a route around the fence must exist");
+                let mut previous = from;
+                for waypoint in &path.waypoints {
+                    assert_eq!(waypoint.floor, 0);
+                    assert!(
+                        !is_movement_blocked(
+                            &cache, previous.0, previous.1, waypoint.x, waypoint.z, 0, None,
+                        ),
+                        "{axis:?}: blocked leg {previous:?} -> {waypoint:?}",
+                    );
+                    previous = (waypoint.x, waypoint.z);
+                }
+                assert_eq!(previous, to);
+            }
+        }
+    }
+
+    #[test]
     fn fence_blocks_only_its_edge_in_both_directions() {
         for axis in [FenceAxis::X, FenceAxis::Z] {
             let edge = FenceEdge { x: -2, z: -3, axis };
