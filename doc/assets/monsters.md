@@ -3,6 +3,8 @@
 ## Monster
 
 - skeleton_knight — 사용자 제공 Tripo Pro 유료 생성 모델, 2026-09-12 생성(사용자 확인).
+  - [컨셉아트](../images/monsters/skeleton_knight_concept.png): 이 대화에서 OpenAI 이미지 생성으로
+    제작한 정예 스켈레톤 기사, 2026-09-12 생성. OpenAI 서비스 이용 조건 적용(이용 요금제 미확인).
   Tripo 서비스 이용 조건 적용. 원본 `skeleton+knight+3d+model.glb`는
   `assets/skeleton_knight/source.glb`에 보관한다. 10,002 triangles, Tripo 41본 리그,
   1024² base color·normal·metallic/roughness 텍스처를 유지하고 장식 포함 높이 2.05m로 맞췄다.
