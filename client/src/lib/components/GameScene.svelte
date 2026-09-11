@@ -54,6 +54,7 @@
   import { bootstrapSceneAssets } from './game-scene/asset-bootstrap'
   import { maybeSendEnvReport } from '../utils/clientEnvReport'
   import GameScenePlayersLayer from './game-scene/GameScenePlayersLayer.svelte'
+  import GameSceneEnchantSuccessLayer from './game-scene/GameSceneEnchantSuccessLayer.svelte'
   import GameSceneMonstersLayer from './game-scene/GameSceneMonstersLayer.svelte'
   import GameSceneGroundItemsLayer from './game-scene/GameSceneGroundItemsLayer.svelte'
   import GameSceneCampfiresLayer from './game-scene/GameSceneCampfiresLayer.svelte'
@@ -1318,6 +1319,7 @@
 <T is={entityClipGroupObj} bind:ref={entityClipGroup}>
   <!-- Under the clip group so labels are hidden with entities in the water passes -->
   <T is={damageTextPool.group} />
+  <GameSceneEnchantSuccessLayer {currentPlayer} />
   <!-- Hidden surface meshes still raycast, so drop them from the click lists underground -->
   <GameScenePlayersLayer
     bind:this={playersLayer}
