@@ -250,7 +250,7 @@
 ## Great Sword (2026-09-12)
 
 - 제공된 걷기 원본은 뒷걸음질 동작이므로 `great_sword_walk`의 키프레임 순서를 역전해 전진 걷기로 사용한다. 변환 스크립트에서 적용하며 원본 FBX는 보존한다.
-- 사용자 제공 FBX: `Great Sword Idle (1).fbx`, `Great Sword Walk.fbx`, `Great Sword Run.fbx`, `Great Sword Slash.fbx`. Mixamo 호환 본 구조. 다운로드 서비스·라이선스 약관은 별도 확인되지 않았으며 모델의 Pro 생성 확인과 구분한다.
+- 사용자 제공 FBX: `Great Sword Idle (1).fbx`, `Great Sword Walk.fbx`, `Great Sword Run.fbx`, `Great Sword Slash.fbx`. 출처: Adobe Mixamo(사용자 확인, 2026-09-12). 라이선스 기록은 [characters.md의 Mixamo 항목](characters.md)을 따른다. 모델의 Pro 생성 출처와 구분한다.
 - 원본은 `assets/great_sword/animations/`에 보존. `build_great_sword_animations.py`가 기존 `all_animation.blend`의 `Armature_combat`에 리타게팅하고 별도 작업 파일로 저장한다. 기존 애니메이션 팩은 변경하지 않는다.
 - 출력: `client/public/models/animations/great_sword.glb`. `great_sword_idle` 7.542초, `great_sword_walk` 1.292초, `great_sword_run` 0.583초, `great_sword_slash` 1.250초(24fps 원본). 수평 루트 이동 제거, 수직 움직임 유지, 시작 프레임 0 정렬. 배포 팩의 캐릭터 메시·재질은 기존 exporter로 제거한다.
 - 캐릭터별 리타게팅·지면 보정 후 대검에만 적용한다. Slash의 0.625초 타격 자세를 기존 근접 판정 0.540초에 맞춰 재생 시간을 조정한다(전체 약 1.08초). 종료 후 대검 Idle로 전환한다. 캐릭터 선택 화면도 같은 Idle을 사용한다.
