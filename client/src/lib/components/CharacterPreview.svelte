@@ -4,6 +4,8 @@
   import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
   import { onDestroy, untrack } from 'svelte'
   import { AnimationIndex } from '../types/animations'
+  import { getWeaponAnimation } from '../data/weaponAnimationDefs'
+  import { loadWeaponAnimations } from '../utils/weaponAnimations'
   import {
     createCharacterModelRoot,
     findBoneByName,
@@ -96,6 +98,29 @@
   let footBones: THREE.Bone[] = []
   let validAnimations = $state<THREE.AnimationClip[]>([])
   let setupDone = $state(false)
+  let weaponIdle: THREE.AnimationClip | undefined
+
+  $effect(() => {
+    const root = modelRoot
+    const profile = getWeaponAnimation(equipment?.main_hand)
+    weaponIdle = undefined
+    if (!root) return
+    let cancelled = false
+    if (profile) {
+      void loadWeaponAnimations(modelPath, root, profile)
+        .then((clips) => {
+          if (cancelled) return
+          weaponIdle = profile.idle ? clips.get(profile.idle) : undefined
+          playIdleAnimation()
+        })
+        .catch((error) => console.error('Failed to load weapon preview', error))
+    } else {
+      untrack(playIdleAnimation)
+    }
+    return () => {
+      cancelled = true
+    }
+  })
 
   const OVERLAP_BEFORE_END = 0.3
 
@@ -115,7 +140,7 @@
     ]
     const idleIndex =
       idleIndices[Math.floor(Math.random() * idleIndices.length)]
-    const clip = validAnimations[idleIndex]
+    const clip = weaponIdle ?? validAnimations[idleIndex]
     if (!clip) return
 
     const newAction = mixer.clipAction(clip)

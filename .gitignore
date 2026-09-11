@@ -72,6 +72,7 @@ data/bgm.json
 data/debuffs.json
 data/dungeons.json
 data/items.json
+data/weapon_animations.json
 data/map_labels.json
 data/merchants.json
 data/monsters.json

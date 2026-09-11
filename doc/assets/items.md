@@ -144,3 +144,6 @@
     - 가방 아이콘과 땅에 펼쳐지는 탁자가 같은 모델이다 — 아이콘이 곧 설명이 된다. `items.csv`의 `worldModel`도 같은 GLB를 가리킨다.
     - 아이콘 `client/public/items/objects/peddler_stall.png`: Cycles 128 samples, 투명 직교 렌더 512²→128² RGBA, Euler (-62°, 0°, 0°) — 카메라 쪽으로 눕혀 탁자 위의 물건이 판자가 아니라 상품으로 읽히게 하되, 롤은 주지 않아 가방 칸에서 수평으로 놓인다. 2026-09-09 생성.
     - 재현 명령: `/Applications/Blender.app/Contents/MacOS/Blender -b -P tools/blender-scripts/render_peddler_stall_icon.py`
+
+- great_sword.glb — 사용자 직접 생성, Pro 요금제, 2026-09-12. 제공 파일: `fantasy+sword+3d+model.glb`. 제작 서비스·라이선스 약관은 미확인(사용자가 Pro 생성임을 확인). 원본은 `assets/great_sword/source.glb`에 보존. 전장 1.8m, 칼날 +X, 칼날 평면 XZ(Blender), 원점은 손잡이 끝에서 전장의 19%. 텍스처 3장 512², emissive 제거. `export_item_asset.py --rotation 0 90 0 --grip-fraction 0.19 --icon-rotation 90 0 40`으로 GLB 및 투명 128² 아이콘 생성. `great_sword`: great_sword 타입·2d8·무게 6·28,000·티어 4·hands=2. 전용 Idle·Walk·Run·Slash 팩 사용. 공격 파지를 기준으로 손 로컬 회전(-1.907 / -0.475 / 0.139 rad)을 맞췄으며 타입별 weapon_animations.csv에서 읽는다. 애니메이션 출처는 animation.md 참조.
+    - 컨셉아트: 사용자 제공 `image.png`, 사용자 직접 생성(Pro, 2026-09-12); 제작 서비스·라이선스 약관 미확인. ![원화](../images/items/great_sword.png)

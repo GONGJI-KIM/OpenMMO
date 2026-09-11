@@ -101,6 +101,11 @@
   import { pickRandom } from '../utils/randomUtils'
   import { inventoryStore, isTorchItemDefId } from '../stores/inventoryStore'
   import { capeColorOf, getItemDef, isRangedWeapon } from '../data/itemDefs'
+  import {
+    getWeaponAnimation,
+    weaponAnimationClipName,
+  } from '../data/weaponAnimationDefs'
+  import { loadWeaponAnimations } from '../utils/weaponAnimations'
   import { capeDyePreview } from '../stores/capeDyeStore'
   import { capeTexturePreview } from '../stores/capeTextureStore'
   import { capeTextureUrl } from '../utils/networkUtils'
@@ -379,6 +384,7 @@
   )
   let offhandClips = new SvelteMap<string, THREE.AnimationClip>()
   let rangedClips = new SvelteMap<string, THREE.AnimationClip>()
+  let weaponClips = new Map<string, THREE.AnimationClip>()
   let socialClipsByName = new SvelteMap<string, THREE.AnimationClip>()
   let socialLoadPromise: Promise<void> | null = null
   let lastAnimKey: string | undefined
@@ -498,6 +504,27 @@
   )
 
   let attachedWeaponItemId: string | null = null
+  const weaponAnimationProfile = $derived(
+    getWeaponAnimation(equippedMainHandItemId)
+  )
+  $effect(() => {
+    const root = modelRoot
+    const profile = weaponAnimationProfile
+    if (!root || !profile) return
+    let cancelled = false
+    void loadWeaponAnimations(modelPath, root, profile)
+      .then((clips) => {
+        if (cancelled) return
+        weaponClips = clips
+        playAnimationForState()
+      })
+      .catch((error) =>
+        console.error('Failed to load weapon animations', error)
+      )
+    return () => {
+      cancelled = true
+    }
+  })
   let weaponAttachGeneration = 0
 
   $effect(() => {
@@ -892,20 +919,33 @@
       ? offhandClips.get(OffhandAnimationName.TORCH_RUN)
       : undefined
     let clip: THREE.AnimationClip | undefined
+    const weaponClipName = weaponAnimationClipName(
+      weaponAnimationProfile,
+      playerState,
+      movementMode
+    )
+    const weaponClip = weaponClipName
+      ? weaponClips.get(weaponClipName)
+      : undefined
     if (playerState === 'idle') {
       clip =
+        weaponClip ??
         torchIdle ??
         pickClassIdleClip() ??
         pickRandom(DEFAULT_IDLE_INDICES.map((i) => validAnimations[i]))
     } else if (playerState === 'moving') {
       const torchMoveClip = movementMode === 'run' ? torchRun : torchWalk
       clip =
-        torchMoveClip ?? validAnimations[selectMovementAnimation(movementMode)]
+        weaponClip ??
+        torchMoveClip ??
+        validAnimations[selectMovementAnimation(movementMode)]
     } else if (playerState === 'attack') {
       clip =
+        weaponClip ??
         (isRangedWeapon(equippedMainHandItemId)
           ? rangedClips.get(RangedAnimationName.SHOOT)
-          : undefined) ?? validAnimations[AnimationIndex.SLASH1]
+          : undefined) ??
+        validAnimations[AnimationIndex.SLASH1]
     } else if (playerState === 'jump') {
       // One-shot feedback when slope is too steep to climb. After the clip
       // finishes, PlayerControl flips the state back to idle/moving and we
@@ -1345,6 +1385,16 @@
         // cycle's animKey change crossfades back into the slash.
         if (
           playerState === 'attack' &&
+          remainingTime <= 0.05 &&
+          clip.name === weaponAnimationProfile?.attack
+        ) {
+          const idle = weaponAnimationProfile?.idle
+            ? weaponClips.get(weaponAnimationProfile.idle)
+            : undefined
+          if (idle) startAction(idle, false)
+        }
+        if (
+          playerState === 'attack' &&
           remainingTime <= OVERLAP_BEFORE_END &&
           clip.name === AnimationName.SLASH1 &&
           // When the pack lacked the clip the ordered array substituted a
@@ -1423,7 +1473,7 @@
 
     // Update animation state
     if (validAnimations.length > 0) {
-      const animKey =
+      const stateKey =
         riding && ridingClip
           ? 'riding'
           : playerState === 'interact'
@@ -1433,6 +1483,7 @@
               : playerState === 'attack'
                 ? `attack:${attackCounter}`
                 : playerState
+      const animKey = `${equippedMainHandItemId ?? ''}:${stateKey}`
       if (lastAnimKey !== animKey) {
         lastAnimKey = animKey
         playAnimationForState()
