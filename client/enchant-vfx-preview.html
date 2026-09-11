@@ -33,13 +33,12 @@
         height: 58vh;
       }
       .labels {
-        display: flex;
-        justify-content: space-around;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
         text-align: center;
       }
-      small {
-        display: block;
-        color: #a6b3a6;
+      h2 {
+        font-size: 19px;
       }
       canvas {
         display: block;
@@ -49,7 +48,10 @@
   <body>
     <header>
       <h1>강화 성공 효과 비교</h1>
-      <p>실제 발키리 모델 · 게임 기본 줌의 화면 크기 · 손 위치에 표시</p>
+      <p>
+        실제 발키리 모델 · 게임 기본 줌의 화면 크기 · 갑옷은 몸통, 무기는
+        오른손에 표시
+      </p>
       <button id="replay">다시 재생</button>
       <select id="speed">
         <option value="0.25">느리게 · 4배 확대 관찰</option>
@@ -59,12 +61,16 @@
     <div id="view"></div>
     <div class="labels">
       <div>
-        <h2>기본 표현</h2>
-        <small>먼지 20개 · 빛의 실 3개</small>
+        <h2>갑옷 · 기본</h2>
       </div>
       <div>
-        <h2>간소화 표현</h2>
-        <small>먼지 8개 · 빛의 실 1개<br />먼 거리 / 동시 효과가 많을 때</small>
+        <h2>갑옷 · 간소화</h2>
+      </div>
+      <div>
+        <h2>무기 · 기본</h2>
+      </div>
+      <div>
+        <h2>무기 · 간소화</h2>
       </div>
     </div>
     <script type="module">
@@ -90,10 +96,15 @@
         '/textures/vfx/enchant-filament.png'
       )
       map.colorSpace = THREE.SRGBColorSpace
-      const anchors = [
-        new THREE.Vector3(-6, 0.9, 0),
-        new THREE.Vector3(6, 0.9, 0),
+      const variants = [
+        { weapon: false, reduced: false },
+        { weapon: false, reduced: true },
+        { weapon: true, reduced: false },
+        { weapon: true, reduced: true },
       ]
+      const anchors = variants.map(() => new THREE.Vector3())
+      const models = []
+      const pedestals = []
       scene.add(new THREE.HemisphereLight('#e9eedf', '#404c32', 2))
       const sun = new THREE.DirectionalLight('#fff2dc', 2)
       sun.position.set(-3, 7, 5)
@@ -107,13 +118,14 @@
       )
       const hands = []
       const mixers = []
-      for (let i = 0; i < 2; i++) {
+      for (let i = 0; i < variants.length; i++) {
         const { clonedScene, modelRoot } = createCharacterModelRoot(
           character.scene
         )
         clonedScene.position.y = computeSoleGroundOffset(modelRoot)
         modelRoot.position.x = anchors[i].x
         scene.add(modelRoot)
+        models.push(modelRoot)
         hands.push(findBoneByName(clonedScene, 'RightHand'))
         const mixer = new THREE.AnimationMixer(modelRoot)
         const clip = [...character.animations, ...locomotion.animations].find(
@@ -123,7 +135,7 @@
         mixers.push(mixer)
       }
       const effects = anchors.map(() => new EnchantSuccessEffect(map))
-      for (let i = 0; i < 2; i++) {
+      for (let i = 0; i < variants.length; i++) {
         scene.add(effects[i].group)
         effects[i].group.visible = true
         const mesh = new THREE.Mesh(
@@ -132,6 +144,7 @@
         )
         mesh.position.x = anchors[i].x
         scene.add(mesh)
+        pedestals.push(mesh)
       }
       await renderer.init()
       await renderer.compileAsync(scene, camera)
@@ -145,6 +158,13 @@
         camera.right = -camera.left
         camera.bottom = -camera.top
         camera.updateProjectionMatrix()
+        models.forEach((model, i) => {
+          const x =
+            camera.left +
+            (camera.right - camera.left) * ((i + 0.5) / variants.length)
+          model.position.x = x
+          pedestals[i].position.x = x
+        })
       }
       resize()
       window.addEventListener('resize', resize)
@@ -163,18 +183,19 @@
         mixers.forEach((mixer) => mixer.update((now - last) / 1000))
         scene.updateMatrixWorld(true)
         hands.forEach((hand, i) => {
-          if (hand) hand.getWorldPosition(anchors[i])
+          anchors[i].set(models[i].position.x, 1.1, 0)
+          if (variants[i].weapon && hand) hand.getWorldPosition(anchors[i])
         })
         last = now
         if (elapsed > 1.1) elapsed = 0
-        for (let i = 0; i < 2; i++) {
+        for (let i = 0; i < variants.length; i++) {
           if (elapsed < 0.6)
             effects[i].update(
               Math.min(1, elapsed / 0.3),
               elapsed < 0.3 ? null : (elapsed - 0.3) * 2,
               anchors[i],
               camera,
-              i === 1
+              variants[i].reduced
             )
           else effects[i].clear()
         }

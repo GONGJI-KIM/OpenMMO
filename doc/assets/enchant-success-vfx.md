@@ -10,6 +10,8 @@
 - Detail: 20 motes and three filaments normally; eight motes and one filament beyond 15m or when more than eight effects are active. Offscreen remote effects skip drawing. Remote effects have no scene light. Only one permanent local light changes intensity; shaders compile during loading.
 - Texture: PNG is tracked in Git, consistent with existing PNG textures; it is not in the HF-managed GLB/audio/source-asset set.
 - Preview: run the client Vite development server and open `/enchant-vfx-preview.html` for a side-by-side comparison at real speed or 4x slow motion. Uses the same runtime effect class.
+- Texture animation: gentle UV distortion, dissolving edges, and eased fading continue through the release phase.
+- GIF previews: `doc/assets/enchant-success-preview/{armor,weapon}-{full,reduced}.gif`, rendered from the preview on 2026-09-12 KST using the existing Valkyrie and locomotion assets. These are repository-rendered derivatives, retain the underlying assets' license terms, and have no separate AI generation or paid-tool tier. Each GIF preserves the default game-scale character at a 912px viewport height, with 0.6 seconds of effect and 0.5 seconds between loops. They are documentation assets tracked in Git, not HF-managed game binaries.
 
 ## Generation prompt
 
